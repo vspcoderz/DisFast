@@ -5,6 +5,7 @@ import type { Channel, GatewayStatus, Guild, GuildSelection, User } from "../typ
 import { GuildSidebar } from "./GuildSidebar";
 import { ChannelPane, type DmTarget } from "./ChannelPane";
 import { ChatPane } from "./ChatPane";
+import { GroupDmPanel } from "./GroupDmPanel";
 import { ProfilePanel } from "./ProfilePanel";
 
 export interface ActiveChannel {
@@ -16,6 +17,10 @@ export interface ActiveChannel {
   recipientAvatar?: string;
   /** Username for 1:1 DMs, used in the search placeholder. */
   recipientUsername?: string;
+  /** Set for group DMs — enables the members panel. */
+  isGroupDm?: boolean;
+  /** Group DM members. */
+  recipients?: User[];
 }
 
 function channelKey(ch: ActiveChannel): string {
@@ -154,9 +159,11 @@ export function Main({ user }: { user: User }) {
     });
   }, []);
 
-  const guild = guilds.find((g) => g.id === activeGuild) ?? null;
   const recipientId = activeChannel?.recipientId;
-  const profileVisible = recipientId != null && showProfile;
+  const isGroupDm = activeChannel?.isGroupDm === true;
+  const profileVisible = (recipientId != null || isGroupDm) && showProfile;
+
+  const guild = guilds.find((g) => g.id === activeGuild) ?? null;
 
   return (
     <div
@@ -237,7 +244,12 @@ export function Main({ user }: { user: User }) {
         <main className="chat-pane" />
       )}
 
-      {profileVisible && <ProfilePanel userId={recipientId} />}
+      {profileVisible &&
+        (isGroupDm ? (
+          <GroupDmPanel channelId={activeChannel.id} name={activeChannel.name} members={activeChannel.recipients ?? []} />
+        ) : (
+          <ProfilePanel userId={recipientId!} />
+        ))}
       {error && <div className="error-toast">{error}</div>}
     </div>
   );

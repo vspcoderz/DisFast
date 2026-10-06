@@ -28,6 +28,8 @@ export const api = {
     invoke<Message>("send_message", { channelId, content }),
   getUserProfile: (userId: string) =>
     invoke<UserProfileResponse>("get_user_profile", { userId }),
+  createInvite: (channelId: string) =>
+    invoke<{ code: string }>("create_invite", { channelId }),
   /** Debug builds only; null in release. */
   getDevToken: () => invoke<string | null>("get_dev_token"),
 };

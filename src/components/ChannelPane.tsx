@@ -5,6 +5,8 @@ export interface DmTarget {
   recipientId?: string;
   recipientAvatar?: string;
   recipientUsername?: string;
+  isGroupDm?: boolean;
+  recipients?: User[];
 }
 
 interface Props {
@@ -49,8 +51,10 @@ export function ChannelPane({
         {isDm
           ? dms.map((ch) => {
               const name = dmChannelName(ch);
-              // 1:1 DMs (type 1) enable the profile panel; group DMs don't
+              // 1:1 DMs (type 1) enable the profile panel; group DMs (type 3)
+              // enable the members panel
               const recipient = ch.type === 1 ? ch.recipients?.[0] : undefined;
+              const isGroupDm = ch.type === 3;
               const unread = unreadChannels[ch.id];
               return (
                 <div
@@ -60,11 +64,13 @@ export function ChannelPane({
                     onSelect(
                       ch.id,
                       name,
-                      recipient && {
-                        recipientId: recipient.id,
-                        recipientAvatar: avatarUrl(recipient),
-                        recipientUsername: recipient.username,
-                      },
+                      isGroupDm
+                        ? { isGroupDm: true, recipients: ch.recipients ?? [] }
+                        : recipient && {
+                            recipientId: recipient.id,
+                            recipientAvatar: avatarUrl(recipient),
+                            recipientUsername: recipient.username,
+                          },
                     )
                   }
                 >

@@ -358,6 +358,37 @@ async fn get_messages(
 }
 
 #[tauri::command]
+async fn create_invite(
+    state: State<'_, SharedSession>,
+    channel_id: String,
+) -> Result<serde_json::Value, String> {
+    let http = http(&state).await?;
+    let url = format!("{API_BASE}/channels/{channel_id}/invites");
+    for attempt in 0..3 {
+        let res = http
+            .post(&url)
+            .json(&serde_json::json!({ "max_age": 86400, "max_uses": 0 }))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        let status = res.status();
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS && attempt < 2 {
+            let body = res.json().await.unwrap_or_default();
+            let wait = retry_after(&body);
+            eprintln!("[disfast] rate limited creating invite, retrying in {wait:.1}s");
+            tokio::time::sleep(std::time::Duration::from_secs_f64(wait)).await;
+            continue;
+        }
+        if !status.is_success() {
+            let body = res.text().await.unwrap_or_default();
+            return Err(format!("invite failed ({status}): {body}"));
+        }
+        return res.json().await.map_err(|e| e.to_string());
+    }
+    unreachable!()
+}
+
+#[tauri::command]
 async fn get_user_profile(
     state: State<'_, SharedSession>,
     user_id: String,
@@ -432,6 +463,7 @@ pub fn run() {
             get_messages,
             send_message,
             get_user_profile,
+            create_invite,
             get_dev_token,
         ])
         .run(tauri::generate_context!())
