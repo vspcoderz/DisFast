@@ -126,7 +126,9 @@ async fn run_gateway(app: AppHandle, token: String, dms: SharedDms, users: Share
         eprintln!("[disfast] gateway: connecting (attempt {attempt}/{MAX_ATTEMPTS})");
 
         let mut shard = Shard::new(ShardId::ONE, token.clone(), intents);
+        eprintln!("[disfast] gateway: shard created, polling for events...");
         pump_events(&app, &mut shard, &dms, &users).await;
+        eprintln!("[disfast] gateway: pump_events returned (stream ended)");
 
         if attempt == MAX_ATTEMPTS {
             break;
@@ -154,13 +156,16 @@ async fn pump_events(
         let message = match item {
             Ok(message) => message,
             Err(err) => {
+                eprintln!(
+                    "[disfast] gateway: receive error kind={:?} detail={}",
+                    err.kind(),
+                    err
+                );
                 if matches!(err.kind(), ReceiveMessageErrorType::Reconnect) {
                     // The shard gave up; the outer loop will make a fresh one.
-                    eprintln!("[disfast] gateway: shard failed: {err}");
                     break;
                 }
                 // Recoverable (e.g. decompression): shard keeps going.
-                eprintln!("[disfast] gateway: recoverable error: {err}");
                 continue;
             }
         };
