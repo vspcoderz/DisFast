@@ -72,6 +72,12 @@ export interface MessageComponent {
   file?: { url: string };
 }
 
+export interface Reaction {
+  emoji: { id: string | null; name: string | null };
+  count: number;
+  me: boolean;
+}
+
 export interface Message {
   id: string;
   channel_id: string;
@@ -83,8 +89,17 @@ export interface Message {
   attachments: Attachment[];
   embeds?: Embed[];
   components?: MessageComponent[];
+  reactions?: Reaction[];
   /** bit 15 (1 << 15) = IS_COMPONENTS_V2 */
   flags?: number;
+  /** Reference to a replied-to message */
+  message_reference?: {
+    channel_id: string;
+    guild_id?: string | null;
+    message_id: string;
+  } | null;
+  /** The message being replied to (if included) */
+  referenced_message?: Message | null;
 }
 
 /** MESSAGE_UPDATE payloads are partial — only changed fields are present. */

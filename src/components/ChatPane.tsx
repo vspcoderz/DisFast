@@ -1,16 +1,24 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api, events } from "../api";
-import { Avatar } from "./Avatar";
 import { renderMarkdown } from "../markdown";
 import { IS_COMPONENTS_V2, type Message } from "../types";
 import { displayName, formatTime } from "../utils";
 import type { ActiveChannel } from "./Main";
 import { ComponentView, EmbedView } from "./RichContent";
+import { Avatar } from "./Avatar";
 
 // Memoized so a new incoming message doesn't re-render the whole history —
 // the main source of "lag when messages arrive".
-const MessageRow = memo(function MessageRow({ msg }: { msg: Message }) {
+const MessageRow = memo(function MessageRow({
+  msg,
+  onImageClick,
+}: {
+  msg: Message;
+  onImageClick: (url: string) => void;
+}) {
   const isV2 = ((msg.flags ?? 0) & IS_COMPONENTS_V2) !== 0;
+  const reply = msg.referenced_message;
+
   return (
     <div className="message" data-id={msg.id}>
       <Avatar user={msg.author} size={38} />
@@ -19,6 +27,14 @@ const MessageRow = memo(function MessageRow({ msg }: { msg: Message }) {
           <span className="author">{displayName(msg.author)}</span>
           <span className="time">{formatTime(msg.timestamp)}</span>
         </div>
+        {reply && (
+          <div className="reply-ref">
+            <span className="reply-author">{displayName(reply.author)}</span>
+            <span className="reply-content">
+              {reply.content || (reply.attachments?.length ? "📎 Attachment" : "")}
+            </span>
+          </div>
+        )}
         {msg.content ? (
           <div
             className="content"
@@ -35,6 +51,7 @@ const MessageRow = memo(function MessageRow({ msg }: { msg: Message }) {
               src={att.url}
               alt={att.filename}
               loading="lazy"
+              onClick={() => onImageClick(att.url)}
               style={
                 att.width && att.height
                   ? { aspectRatio: `${att.width} / ${att.height}` }
@@ -47,14 +64,44 @@ const MessageRow = memo(function MessageRow({ msg }: { msg: Message }) {
             </a>
           ),
         )}
+        {msg.reactions && msg.reactions.length > 0 && (
+          <div className="reactions">
+            {msg.reactions.map((r, i) => (
+              <button
+                key={i}
+                className={`reaction${r.me ? " me" : ""}`}
+                title={r.emoji.name ?? r.emoji.id ?? ""}
+                onClick={() =>
+                  r.me
+                    ? api.removeReaction(msg.channel_id, msg.id, emojiKey(r.emoji))
+                    : api.addReaction(msg.channel_id, msg.id, emojiKey(r.emoji))
+                }
+              >
+                {r.emoji.name ? (
+                  r.emoji.name
+                ) : (
+                  <img
+                    src={`https://cdn.discordapp.com/emojis/${r.emoji.id}.png`}
+                    alt=""
+                    loading="lazy"
+                  />
+                )}
+                <span>{r.count}</span>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
 });
 
+function emojiKey(emoji: { id: string | null; name: string | null }): string {
+  return emoji.name ?? (emoji.id ?? "");
+}
+
 interface Props {
   channel: ActiveChannel;
-  /** Search query from the header (owned by Main). */
   query: string;
 }
 
@@ -62,12 +109,11 @@ export function ChatPane({ channel, query }: Props) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [hasMore, setHasMore] = useState(true);
   const [draft, setDraft] = useState("");
+  const [lightbox, setLightbox] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const loadingHistory = useRef(false);
   const stickToBottom = useRef(true);
   const lastScrollTop = useRef(0);
-  // Set when we prepend history; applied after React commits the DOM so
-  // the viewport stays anchored on the same message.
   const pendingAnchor = useRef<number | null>(null);
 
   // Initial load. The API returns newest first; we store oldest→newest.
@@ -192,7 +238,7 @@ export function ChatPane({ channel, query }: Props) {
         )}
         {q && <div className="history-start">{visible.length} result{visible.length === 1 ? "" : "s"}</div>}
         {visible.map((m) => (
-          <MessageRow key={m.id} msg={m} />
+          <MessageRow key={m.id} msg={m} onImageClick={setLightbox} />
         ))}
       </div>
       <div className="composer">
@@ -205,6 +251,11 @@ export function ChatPane({ channel, query }: Props) {
           onKeyDown={(e) => e.key === "Enter" && send()}
         />
       </div>
+      {lightbox && (
+        <div className="lightbox" onClick={() => setLightbox(null)}>
+          <img src={lightbox} alt="" />
+        </div>
+      )}
     </main>
   );
 }

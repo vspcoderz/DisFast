@@ -30,6 +30,14 @@ export const api = {
     invoke<UserProfileResponse>("get_user_profile", { userId }),
   createInvite: (channelId: string) =>
     invoke<{ code: string }>("create_invite", { channelId }),
+  addReaction: (channelId: string, messageId: string, emoji: string) =>
+    invoke<void>("add_reaction", { channelId, messageId, emoji }),
+  removeReaction: (channelId: string, messageId: string, emoji: string) =>
+    invoke<void>("remove_reaction", { channelId, messageId, emoji }),
+  getMembers: (guildId: string) =>
+    invoke<Array<{ user: User; nick: string | null; roles: string[] }>>("get_members", { guildId }),
+  getRoles: (guildId: string) =>
+    invoke<Array<{ id: string; name: string; color: number | null; position: number }>>("get_roles", { guildId }),
   /** Debug builds only; null in release. */
   getDevToken: () => invoke<string | null>("get_dev_token"),
 };

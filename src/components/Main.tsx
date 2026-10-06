@@ -6,6 +6,7 @@ import { GuildSidebar } from "./GuildSidebar";
 import { ChannelPane, type DmTarget } from "./ChannelPane";
 import { ChatPane } from "./ChatPane";
 import { GroupDmPanel } from "./GroupDmPanel";
+import { MemberSidebar } from "./MemberSidebar";
 import { ProfilePanel } from "./ProfilePanel";
 
 export interface ActiveChannel {
@@ -162,6 +163,7 @@ export function Main({ user }: { user: User }) {
   const recipientId = activeChannel?.recipientId;
   const isGroupDm = activeChannel?.isGroupDm === true;
   const profileVisible = (recipientId != null || isGroupDm) && showProfile;
+  const showMembers = activeGuild !== "dm" && activeChannel != null;
 
   const guild = guilds.find((g) => g.id === activeGuild) ?? null;
 
@@ -244,6 +246,7 @@ export function Main({ user }: { user: User }) {
         <main className="chat-pane" />
       )}
 
+      {showMembers && <MemberSidebar guildId={activeGuild} />}
       {profileVisible &&
         (isGroupDm ? (
           <GroupDmPanel channelId={activeChannel.id} name={activeChannel.name} members={activeChannel.recipients ?? []} />

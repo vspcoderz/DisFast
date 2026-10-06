@@ -1,12 +1,11 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use futures_util::StreamExt as _;
+use futures_util::{SinkExt as _, StreamExt as _};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, USER_AGENT};
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::Mutex;
-use twilight_gateway::error::ReceiveMessageErrorType;
-use twilight_gateway::{Intents, Message, Shard, ShardId};
+use tokio_tungstenite::tungstenite::Message as WsMessage;
 
 const API_BASE: &str = "https://discord.com/api/v9";
 
@@ -106,34 +105,33 @@ async fn http(state: &State<'_, SharedSession>) -> Result<reqwest::Client, Strin
         .ok_or_else(|| "not logged in".to_string())
 }
 
-/// Gateway loop: receives real-time events from Discord and forwards
-/// them to the frontend as Tauri events.
-///
-/// We consume the shard as a raw JSON stream rather than twilight's
-/// typed events: the frontend consumes JSON anyway, and user accounts
-/// receive fields (like `READY.private_channels`) that twilight's
-/// bot-oriented types discard.
-async fn run_gateway(app: AppHandle, token: String, dms: SharedDms, users: SharedUsers) {
-    let intents = Intents::GUILDS
-        | Intents::GUILD_MESSAGES
-        | Intents::DIRECT_MESSAGES
-        | Intents::MESSAGE_CONTENT;
+const GATEWAY_URL: &str = "wss://gateway.discord.gg/?v=9&encoding=json";
 
+/// Gateway loop: raw WebSocket client with auto-reconnect.
+///
+/// We bypass twilight-gateway (whose connection layer fails silently for
+/// user accounts) and speak the gateway protocol directly — the frontend
+/// consumes JSON anyway, and user accounts receive fields (like
+/// `READY.private_channels`) that typed libraries discard.
+async fn run_gateway(app: AppHandle, token: String, dms: SharedDms, users: SharedUsers) {
     const MAX_ATTEMPTS: u32 = 5;
 
     for attempt in 1..=MAX_ATTEMPTS {
         let _ = app.emit("gateway-status", "connecting");
         eprintln!("[disfast] gateway: connecting (attempt {attempt}/{MAX_ATTEMPTS})");
 
-        let mut shard = Shard::new(ShardId::ONE, token.clone(), intents);
-        eprintln!("[disfast] gateway: shard created, polling for events...");
-        pump_events(&app, &mut shard, &dms, &users).await;
-        eprintln!("[disfast] gateway: pump_events returned (stream ended)");
+        match connect_and_pump(&app, &token, &dms, &users).await {
+            PumpResult::Ready => {
+                eprintln!("[disfast] gateway: connection closed after READY");
+            }
+            PumpResult::Disconnected => {
+                eprintln!("[disfast] gateway: disconnected");
+            }
+        }
 
         if attempt == MAX_ATTEMPTS {
             break;
         }
-        // Exponential backoff, capped at 30s.
         let backoff = std::cmp::min(30, 1u64 << attempt.min(5));
         eprintln!("[disfast] gateway: reconnecting in {backoff}s");
         let _ = app.emit("gateway-status", "reconnecting");
@@ -145,112 +143,212 @@ async fn run_gateway(app: AppHandle, token: String, dms: SharedDms, users: Share
     let _ = app.emit("gateway-closed", "gateway gave up reconnecting");
 }
 
-/// Reads events from one shard until the stream fails or ends.
-async fn pump_events(
+enum PumpResult {
+    Ready,
+    Disconnected,
+}
+
+/// One gateway connection: connect, identify, pump events until the
+/// stream ends. Returns whether we got READY before disconnecting.
+async fn connect_and_pump(
     app: &AppHandle,
-    shard: &mut Shard,
+    token: &str,
     dms: &SharedDms,
     users: &SharedUsers,
-) {
-    while let Some(item) = shard.next().await {
-        let message = match item {
-            Ok(message) => message,
-            Err(err) => {
-                eprintln!(
-                    "[disfast] gateway: receive error kind={:?} detail={}",
-                    err.kind(),
-                    err
-                );
-                if matches!(err.kind(), ReceiveMessageErrorType::Reconnect) {
-                    // The shard gave up; the outer loop will make a fresh one.
-                    break;
-                }
-                // Recoverable (e.g. decompression): shard keeps going.
-                continue;
+) -> PumpResult {
+    use tokio_tungstenite::connect_async;
+
+    let (ws_stream, _) = match connect_async(GATEWAY_URL).await {
+        Ok(conn) => conn,
+        Err(err) => {
+            eprintln!("[disfast] gateway: connection failed: {err}");
+            return PumpResult::Disconnected;
+        }
+    };
+    eprintln!("[disfast] gateway: WebSocket connected");
+    let (write, mut read) = ws_stream.split();
+
+    // Writer task owns the write half; everyone sends through this channel.
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<WsMessage>();
+    let writer_handle = tokio::spawn(async move {
+        let mut write = write;
+        while let Some(msg) = rx.recv().await {
+            if write.send(msg).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    let send = |msg: WsMessage| {
+        let _ = tx.send(msg);
+    };
+
+    let mut identified = false;
+    let mut got_ready = false;
+    let mut heartbeat_interval: Option<u64> = None;
+
+    loop {
+        let msg = match read.next().await {
+            Some(Ok(msg)) => msg,
+            Some(Err(err)) => {
+                eprintln!("[disfast] gateway: receive error: {err}");
+                break;
+            }
+            None => {
+                eprintln!("[disfast] gateway: stream ended");
+                break;
             }
         };
 
-        let Message::Text(json) = message else {
-            continue; // binary (shouldn't happen with zlib transport) or close frames
-        };
-
-        let Ok(payload) = serde_json::from_str::<serde_json::Value>(&json) else {
+        let WsMessage::Text(text) = msg else {
             continue;
         };
-        let Some(event_type) = payload.get("t").and_then(|t| t.as_str()) else {
-            continue; // opcodes without an event name (hello, acks, ...)
-        };
-        let data = payload.get("d").cloned().unwrap_or(serde_json::Value::Null);
 
-        match event_type {
-            "READY" => {
-                // User-account READY carries `users` (friends + DM
-                // partners) and `private_channels` that may reference them
-                // only by `recipient_ids`.
-                if let Some(list) = data.get("users").and_then(|u| u.as_array()) {
-                    let mut cache = users.lock().await;
-                    for user in list {
-                        if let Some(id) = user.get("id").and_then(|i| i.as_str()) {
-                            cache.insert(id.to_string(), user.clone());
+        let Ok(payload) = serde_json::from_str::<serde_json::Value>(&text) else {
+            continue;
+        };
+        let op = payload.get("op").and_then(|o| o.as_u64()).unwrap_or(0);
+
+        match op {
+            10 => {
+                // HELLO — start heartbeating, then identify.
+                let interval = payload
+                    .get("d")
+                    .and_then(|d| d.get("heartbeat_interval"))
+                    .and_then(|i| i.as_u64())
+                    .unwrap_or(41250);
+                eprintln!("[disfast] gateway: HELLO, heartbeat {interval}ms");
+                heartbeat_interval = Some(interval);
+
+                // Spawn the heartbeat loop for this connection.
+                let hb_tx = tx.clone();
+                tokio::spawn(async move {
+                    loop {
+                        tokio::time::sleep(std::time::Duration::from_millis(interval)).await;
+                        let payload = serde_json::json!({ "op": 1, "d": null });
+                        if hb_tx.send(WsMessage::Text(payload.to_string().into())).is_err() {
+                            return;
                         }
                     }
-                    eprintln!("[disfast] READY: cached {} users", cache.len());
-                }
-                match data.get("private_channels").and_then(|c| c.as_array()) {
-                    Some(channels) => {
-                        eprintln!("[disfast] READY: {} private channels", channels.len());
-                        let mut enriched = Vec::with_capacity(channels.len());
-                        for ch in channels {
-                            enriched.push(enrich_dm(ch.clone(), &users).await);
+                });
+
+                let identify = serde_json::json!({
+                    "op": 2,
+                    "d": {
+                        "token": token,
+                        "properties": {
+                            "os": "linux",
+                            "browser": "DisFast",
+                            "device": "DisFast",
+                        },
+                        "compress": false,
+                        "large_threshold": 250,
+                        "intents": 37377,
+                    },
+                });
+                send(WsMessage::Text(identify.to_string().into()));
+                identified = true;
+            }
+            0 => {
+                let event_type = payload
+                    .get("t")
+                    .and_then(|t| t.as_str())
+                    .unwrap_or_default();
+                let data = payload.get("d").cloned().unwrap_or(serde_json::Value::Null);
+
+                match event_type {
+                    "READY" => {
+                        got_ready = true;
+                        if let Some(list) = data.get("users").and_then(|u| u.as_array()) {
+                            let mut cache = users.lock().await;
+                            for user in list {
+                                if let Some(id) = user.get("id").and_then(|i| i.as_str()) {
+                                    cache.insert(id.to_string(), user.clone());
+                                }
+                            }
+                            eprintln!("[disfast] READY: cached {} users", cache.len());
                         }
-                        *dms.lock().await = enriched;
+                        match data.get("private_channels").and_then(|c| c.as_array()) {
+                            Some(channels) => {
+                                eprintln!("[disfast] READY: {} private channels", channels.len());
+                                let mut enriched = Vec::with_capacity(channels.len());
+                                for ch in channels {
+                                    enriched.push(enrich_dm(ch.clone(), &users).await);
+                                }
+                                *dms.lock().await = enriched;
+                            }
+                            None => {
+                                eprintln!("[disfast] READY: no private_channels field");
+                            }
+                        }
+                        let _ = app.emit("gateway-ready", &data);
+                        let _ = app.emit("gateway-status", "ready");
                     }
-                    None => {
-                        eprintln!("[disfast] READY: no private_channels field");
+                    "MESSAGE_CREATE" => {
+                        if let Some(author) = data.get("author") {
+                            if let Some(id) = author.get("id").and_then(|i| i.as_str()) {
+                                users.lock().await.insert(id.to_string(), author.clone());
+                            }
+                        }
+                        let _ = app.emit("message-create", &data);
                     }
-                }
-                let _ = app.emit("gateway-ready", &data);
-                let _ = app.emit("gateway-status", "ready");
-            }
-            "MESSAGE_CREATE" => {
-                // Grow the user cache from authors we see.
-                if let Some(author) = data.get("author") {
-                    if let Some(id) = author.get("id").and_then(|i| i.as_str()) {
-                        users.lock().await.insert(id.to_string(), author.clone());
+                    "MESSAGE_UPDATE" => {
+                        let _ = app.emit("message-update", &data);
                     }
-                }
-                let _ = app.emit("message-create", &data);
-            }
-            "MESSAGE_UPDATE" => {
-                let _ = app.emit("message-update", &data);
-            }
-            "MESSAGE_DELETE" => {
-                let _ = app.emit("message-delete", &data);
-            }
-            "CHANNEL_CREATE" => {
-                // type 1 = DM, 3 = group DM
-                let kind = data.get("type").and_then(|t| t.as_u64()).unwrap_or(0);
-                if kind == 1 || kind == 3 {
-                    let channel = enrich_dm(data.clone(), &users).await;
-                    let id = channel.get("id").cloned();
-                    let mut guard = dms.lock().await;
-                    if !guard.iter().any(|c| c.get("id") == id.as_ref()) {
-                        guard.push(channel.clone());
+                    "MESSAGE_DELETE" => {
+                        let _ = app.emit("message-delete", &data);
                     }
-                    let _ = app.emit("dm-create", &channel);
+                    "CHANNEL_CREATE" => {
+                        let kind = data.get("type").and_then(|t| t.as_u64()).unwrap_or(0);
+                        if kind == 1 || kind == 3 {
+                            let channel = enrich_dm(data.clone(), &users).await;
+                            let id = channel.get("id").cloned();
+                            let mut guard = dms.lock().await;
+                            if !guard.iter().any(|c| c.get("id") == id.as_ref()) {
+                                guard.push(channel.clone());
+                            }
+                            let _ = app.emit("dm-create", &channel);
+                        }
+                    }
+                    "CHANNEL_DELETE" => {
+                        if let Some(id) = data.get("id") {
+                            dms.lock().await.retain(|c| c.get("id") != Some(id));
+                        }
+                        let _ = app.emit("dm-delete", &data);
+                    }
+                    _ => {}
                 }
             }
-            "CHANNEL_DELETE" => {
-                if let Some(id) = data.get("id") {
-                    dms.lock().await.retain(|c| c.get("id") != Some(id));
-                }
-                let _ = app.emit("dm-delete", &data);
+            1 => {
+                // Heartbeat request — respond immediately.
+                send(WsMessage::Text(
+                    serde_json::json!({ "op": 1, "d": null }).to_string().into(),
+                ));
+            }
+            7 => {
+                eprintln!("[disfast] gateway: RECONNECT requested");
+                break;
+            }
+            9 => {
+                eprintln!("[disfast] gateway: INVALID SESSION");
+                break;
+            }
+            11 => {
+                // Heartbeat ACK — all good.
             }
             _ => {}
         }
     }
 
-    eprintln!("[disfast] gateway: stream ended");
+    drop(tx);
+    let _ = writer_handle.await;
+    let _ = heartbeat_interval;
+
+    if identified && got_ready {
+        PumpResult::Ready
+    } else {
+        PumpResult::Disconnected
+    }
 }
 
 #[tauri::command]
@@ -394,6 +492,79 @@ async fn create_invite(
 }
 
 #[tauri::command]
+async fn add_reaction(
+    state: State<'_, SharedSession>,
+    channel_id: String,
+    message_id: String,
+    emoji: String,
+) -> Result<(), String> {
+    let http = http(&state).await?;
+    let encoded = urlencoding(&emoji);
+    let path = format!("/channels/{channel_id}/messages/{message_id}/reactions/{encoded}/@me");
+    let res = http.put(format!("{API_BASE}{path}")).send().await.map_err(|e| e.to_string())?;
+    let status = res.status();
+    if !status.is_success() {
+        let body = res.text().await.unwrap_or_default();
+        return Err(format!("reaction failed ({status}): {body}"));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn remove_reaction(
+    state: State<'_, SharedSession>,
+    channel_id: String,
+    message_id: String,
+    emoji: String,
+) -> Result<(), String> {
+    let http = http(&state).await?;
+    let encoded = urlencoding(&emoji);
+    let path = format!("/channels/{channel_id}/messages/{message_id}/reactions/{encoded}/@me");
+    let res = http.delete(format!("{API_BASE}{path}")).send().await.map_err(|e| e.to_string())?;
+    let status = res.status();
+    if !status.is_success() {
+        let body = res.text().await.unwrap_or_default();
+        return Err(format!("reaction remove failed ({status}): {body}"));
+    }
+    Ok(())
+}
+
+/// URL-encode an emoji (unicode or custom name:id) for the reactions path.
+fn urlencoding(emoji: &str) -> String {
+    let mut out = String::new();
+    for b in emoji.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char);
+            }
+            _ => {
+                out.push('%');
+                out.push_str(&format!("{:02X}", b));
+            }
+        }
+    }
+    out
+}
+
+#[tauri::command]
+async fn get_members(
+    state: State<'_, SharedSession>,
+    guild_id: String,
+) -> Result<serde_json::Value, String> {
+    let http = http(&state).await?;
+    get_json(&http, &format!("/guilds/{guild_id}/members?limit=1000")).await
+}
+
+#[tauri::command]
+async fn get_roles(
+    state: State<'_, SharedSession>,
+    guild_id: String,
+) -> Result<serde_json::Value, String> {
+    let http = http(&state).await?;
+    get_json(&http, &format!("/guilds/{guild_id}/roles")).await
+}
+
+#[tauri::command]
 async fn get_user_profile(
     state: State<'_, SharedSession>,
     user_id: String,
@@ -467,6 +638,10 @@ pub fn run() {
             get_channels,
             get_messages,
             send_message,
+            add_reaction,
+            remove_reaction,
+            get_members,
+            get_roles,
             get_user_profile,
             create_invite,
             get_dev_token,
