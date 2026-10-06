@@ -105,6 +105,29 @@ export type GatewayStatus = "connecting" | "reconnecting" | "ready" | "failed";
 
 export const IS_COMPONENTS_V2 = 1 << 15;
 
+export interface ProfileBadge {
+  id: string;
+  description: string;
+  icon: string;
+  link?: string;
+}
+
+export interface ProfileWidget {
+  id: string;
+  updated_at: string;
+  data: {
+    type: string;
+    header?: string;
+    sections?: {
+      type: string;
+      title?: string;
+      subtitle?: string;
+      description?: string;
+      image?: { file_id: string; width: number; height: number; is_animated: boolean };
+    }[];
+  };
+}
+
 /** Response of GET /users/{id}/profile */
 export interface UserProfileResponse {
   user: User & {
@@ -128,6 +151,14 @@ export interface UserProfileResponse {
   /** 0 = none, 1 = Nitro Classic, 2 = Nitro, 3 = Nitro Basic */
   premium_type?: number;
   premium_since?: string | null;
+  /** Guilds you share with this user */
+  mutual_guilds?: { id: string; nick: string | null }[];
+  /** Friend nickname (only present for friends) */
+  nickname?: string | null;
+  /** Profile badges (Nitro, HypeSquad, etc.) */
+  badges?: ProfileBadge[];
+  /** Custom profile widgets (Game Collection, Wishlist, etc.) */
+  widgets?: ProfileWidget[];
   user_profile?: {
     bio?: string;
     accent_color?: number | null;

@@ -22,14 +22,24 @@ const NITRO_NAMES: Record<number, string> = {
   3: "Nitro Basic",
 };
 
+function badgeUrl(icon: string): string {
+  return `https://cdn.discordapp.com/badge-icons/${icon}.png`;
+}
+
+function widgetImageUrl(fileId: string): string {
+  return `https://cdn.discordapp.com/widget-images/${fileId}.png`;
+}
+
 export function ProfilePanel({ userId }: { userId: string }) {
   const [profile, setProfile] = useState<UserProfileResponse | null>(null);
   const [error, setError] = useState("");
+  const [bioExpanded, setBioExpanded] = useState(false);
 
   useEffect(() => {
     let alive = true;
     setProfile(null);
     setError("");
+    setBioExpanded(false);
     api
       .getUserProfile(userId)
       .then((p) => alive && setProfile(p))
@@ -57,6 +67,14 @@ export function ProfilePanel({ userId }: { userId: string }) {
       ? `https://cdn.discordapp.com/clan-badges/${clan.identity_guild_id}/${clan.badge}.png`
       : null;
   const nitroName = profile.premium_type ? NITRO_NAMES[profile.premium_type] : null;
+  const pronouns = profile.user_profile?.pronouns;
+  const mutualCount = profile.mutual_guilds?.length ?? 0;
+  const isLongBio = bio != null && bio.length > 120;
+  const shownBio = isLongBio && !bioExpanded ? (bio?.slice(0, 120) ?? "") + "…" : (bio ?? "");
+  // Friend nickname takes priority over global_name
+  const name = profile.nickname ?? displayName(user);
+  const badges = profile.badges ?? [];
+  const widgets = profile.widgets ?? [];
 
   return (
     <aside className="profile-panel">
@@ -72,28 +90,72 @@ export function ProfilePanel({ userId }: { userId: string }) {
       </div>
       <div className="profile-card">
         <div className="profile-name-row">
-          <div className="profile-name">{displayName(user)}</div>
+          <div className="profile-name">{name}</div>
           {nitroName && <span className="nitro-badge">{nitroName}</span>}
         </div>
-        <div className="profile-username">@{user.username}</div>
+        <div className="profile-username">
+          @{user.username}
+          {pronouns && <span className="profile-pronouns-inline">• {pronouns}</span>}
+        </div>
         {clanBadgeUrl && clan && (
           <span className="clan-badge">
             <img src={clanBadgeUrl} alt="" loading="lazy" />
             {clan.tag}
           </span>
         )}
-        {profile.user_profile?.pronouns && (
-          <div className="profile-pronouns">{profile.user_profile.pronouns}</div>
+        {mutualCount > 0 && (
+          <div className="profile-mutual">{mutualCount} Mutual Servers</div>
+        )}
+        {badges.length > 0 && (
+          <div className="profile-badges">
+            {badges.map((b) => (
+              <img
+                key={b.id}
+                className="profile-badge"
+                src={badgeUrl(b.icon)}
+                alt={b.description}
+                title={b.description}
+                loading="lazy"
+              />
+            ))}
+          </div>
         )}
         {bio && (
           <>
             <div className="profile-section-title">About Me</div>
             <div
               className="profile-bio"
-              dangerouslySetInnerHTML={{ __html: renderMarkdown(bio) }}
+              dangerouslySetInnerHTML={{ __html: renderMarkdown(shownBio ?? "") }}
             />
+            {isLongBio && (
+              <button className="view-full-bio" onClick={() => setBioExpanded((v) => !v)}>
+                {bioExpanded ? "Show Less" : "View Full Bio"}
+              </button>
+            )}
           </>
         )}
+        {widgets.map((w) => (
+          <div key={w.id} className="profile-widget">
+            {w.data.header && (
+              <div className="profile-section-title">{w.data.header}</div>
+            )}
+            {w.data.sections?.map((s, i) => (
+              <div key={i} className="widget-section">
+                {s.title && <div className="widget-title">{s.title}</div>}
+                {s.subtitle && <div className="widget-subtitle">{s.subtitle}</div>}
+                {s.description && <div className="widget-desc">{s.description}</div>}
+                {s.image && (
+                  <img
+                    className="widget-image"
+                    src={widgetImageUrl(s.image.file_id)}
+                    alt={s.title ?? ""}
+                    loading="lazy"
+                  />
+                )}
+              </div>
+            ))}
+          </div>
+        ))}
         <div className="profile-section-title">Member Since</div>
         <div className="profile-since">
           {snowflakeDate(user.id).toLocaleDateString([], {
