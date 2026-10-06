@@ -4,10 +4,11 @@ import { guildIconUrl, initials } from "../utils";
 interface Props {
   guilds: Guild[];
   activeGuild: GuildSelection;
+  unreadGuilds: Set<string>;
   onSelect: (sel: GuildSelection) => void;
 }
 
-export function GuildSidebar({ guilds, activeGuild, onSelect }: Props) {
+export function GuildSidebar({ guilds, activeGuild, unreadGuilds, onSelect }: Props) {
   return (
     <nav className="guild-sidebar">
       <div
@@ -27,6 +28,7 @@ export function GuildSidebar({ guilds, activeGuild, onSelect }: Props) {
             onClick={() => onSelect(g.id)}
           >
             {icon ? <img src={icon} alt={g.name} loading="lazy" /> : initials(g.name)}
+            {unreadGuilds.has(g.id) && <span className="guild-dot" />}
           </div>
         );
       })}

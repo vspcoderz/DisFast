@@ -18,6 +18,8 @@ export interface Channel {
   name: string | null;
   position?: number;
   recipients?: User[];
+  /** Snowflake of the most recent message — used to sort DMs by activity. */
+  last_message_id?: string | null;
 }
 
 export interface Attachment {
@@ -67,6 +69,8 @@ export interface MessageComponent {
 export interface Message {
   id: string;
   channel_id: string;
+  /** Present on guild messages, absent on DMs. */
+  guild_id?: string | null;
   content: string;
   timestamp: string;
   author: User;

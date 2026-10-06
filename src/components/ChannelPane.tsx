@@ -13,8 +13,14 @@ interface Props {
   dms: Channel[];
   channels: Channel[];
   activeChannelId: string | null;
+  unreadChannels: Record<string, number>;
   user: User;
   onSelect: (id: string, name: string, dm?: DmTarget) => void;
+}
+
+function UnreadBadge({ count }: { count?: number }) {
+  if (!count) return null;
+  return <span className="unread-badge">{count > 99 ? "99+" : count}</span>;
 }
 
 export function ChannelPane({
@@ -23,6 +29,7 @@ export function ChannelPane({
   dms,
   channels,
   activeChannelId,
+  unreadChannels,
   user,
   onSelect,
 }: Props) {
@@ -42,10 +49,11 @@ export function ChannelPane({
               const name = dmChannelName(ch);
               // 1:1 DMs (type 1) enable the profile panel; group DMs don't
               const recipient = ch.type === 1 ? ch.recipients?.[0] : undefined;
+              const unread = unreadChannels[ch.id];
               return (
                 <div
                   key={ch.id}
-                  className={`channel-item${activeChannelId === ch.id ? " active" : ""}`}
+                  className={`channel-item${activeChannelId === ch.id ? " active" : ""}${unread ? " unread" : ""}`}
                   onClick={() =>
                     onSelect(
                       ch.id,
@@ -58,19 +66,24 @@ export function ChannelPane({
                     )
                   }
                 >
-                  {name}
+                  <span className="channel-name">{name}</span>
+                  <UnreadBadge count={unread} />
                 </div>
               );
             })
-          : textChannels.map((ch) => (
-              <div
-                key={ch.id}
-                className={`channel-item${activeChannelId === ch.id ? " active" : ""}`}
-                onClick={() => onSelect(ch.id, `# ${ch.name}`)}
-              >
-                # {ch.name}
-              </div>
-            ))}
+          : textChannels.map((ch) => {
+              const unread = unreadChannels[ch.id];
+              return (
+                <div
+                  key={ch.id}
+                  className={`channel-item${activeChannelId === ch.id ? " active" : ""}${unread ? " unread" : ""}`}
+                  onClick={() => onSelect(ch.id, `# ${ch.name}`)}
+                >
+                  <span className="channel-name"># {ch.name}</span>
+                  <UnreadBadge count={unread} />
+                </div>
+              );
+            })}
       </div>
       <footer className="user-bar">
         <img src={avatarUrl(user)} alt="" />

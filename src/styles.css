@@ -109,6 +109,18 @@ body,
   /* minmax(0, 1fr) is the key: without it the chat column refuses to
      shrink below its widest content and the window scrolls horizontally */
   grid-template-columns: 68px 240px minmax(0, 1fr);
+  grid-template-rows: 48px minmax(0, 1fr);
+}
+
+/* Sidebars span both rows; the header only covers chat + profile */
+.guild-sidebar,
+.channel-pane {
+  grid-row: 1 / -1;
+}
+
+.chat-header {
+  grid-column: 3 / -1;
+  grid-row: 1;
 }
 
 /* Grid/flex children default to min-height:auto, which lets tall content
@@ -189,10 +201,48 @@ body,
   border-radius: 4px;
   color: var(--text-dim);
   cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.channel-item .channel-name {
+  flex: 1;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  user-select: none;
+}
+
+.channel-item.unread {
+  color: white;
+  font-weight: 600;
+}
+
+.unread-badge {
+  background: #f23f43;
+  color: white;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+
+.guild-icon {
+  position: relative;
+}
+
+.guild-dot {
+  position: absolute;
+  left: -12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: white;
 }
 
 .channel-item:hover {
@@ -229,9 +279,10 @@ body,
 }
 
 .chat-header {
-  padding: 14px 16px;
+  padding: 0 16px;
   font-weight: 700;
   border-bottom: 1px solid var(--bg-0);
+  background: var(--bg-1);
 }
 
 .message-list {
@@ -697,8 +748,13 @@ body,
 }
 
 @media (max-width: 800px) {
-  .app-view {
+  .app-view,
+  .app-view.with-profile {
     grid-template-columns: 60px minmax(0, 1fr);
+  }
+
+  .chat-header {
+    grid-column: 2 / -1;
   }
 
   .pane-toggle {

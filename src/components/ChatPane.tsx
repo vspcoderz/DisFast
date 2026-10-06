@@ -1,5 +1,4 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Menu, PanelRight, Phone, Pin, Search, UserPlus, Video } from "lucide-react";
 import { api, events } from "../api";
 import { renderMarkdown } from "../markdown";
 import { IS_COMPONENTS_V2, type Message } from "../types";
@@ -54,15 +53,14 @@ const MessageRow = memo(function MessageRow({ msg }: { msg: Message }) {
 
 interface Props {
   channel: ActiveChannel;
-  onTogglePane: () => void;
-  onToggleProfile?: () => void;
+  /** Search query from the header (owned by Main). */
+  query: string;
 }
 
-export function ChatPane({ channel, onTogglePane, onToggleProfile }: Props) {
+export function ChatPane({ channel, query }: Props) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [hasMore, setHasMore] = useState(true);
   const [draft, setDraft] = useState("");
-  const [query, setQuery] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
   const loadingHistory = useRef(false);
   const stickToBottom = useRef(true);
@@ -187,42 +185,6 @@ export function ChatPane({ channel, onTogglePane, onToggleProfile }: Props) {
 
   return (
     <main className="chat-pane">
-      <header className="chat-header">
-        <button className="pane-toggle icon-btn" onClick={onTogglePane} title="Channels">
-          <Menu size={18} />
-        </button>
-        {channel.recipientAvatar && (
-          <img className="chat-header-avatar" src={channel.recipientAvatar} alt="" />
-        )}
-        <span className="chat-header-name">{channel.name}</span>
-        <div className="chat-header-actions">
-          <button className="icon-btn" disabled title="Voice calls — coming in Phase 4">
-            <Phone size={18} />
-          </button>
-          <button className="icon-btn" disabled title="Video calls — coming in Phase 4">
-            <Video size={18} />
-          </button>
-          <button className="icon-btn" disabled title="Pinned messages — coming soon">
-            <Pin size={18} />
-          </button>
-          <button className="icon-btn" disabled title="Add friends to DM — coming soon">
-            <UserPlus size={18} />
-          </button>
-          {onToggleProfile && (
-            <button className="icon-btn" onClick={onToggleProfile} title="Toggle profile panel">
-              <PanelRight size={18} />
-            </button>
-          )}
-          <div className="chat-search">
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder={`Search ${channel.recipientUsername ?? channel.name.replace(/^#\s*/, "")}`}
-            />
-            <Search size={14} className="chat-search-icon" />
-          </div>
-        </div>
-      </header>
       <div className="message-list" ref={listRef} onScroll={onScroll}>
         {!hasMore && messages.length > 0 && !q && (
           <div className="history-start">Beginning of conversation</div>
