@@ -278,6 +278,24 @@ async function setupEvents() {
     if (row) row.remove();
   });
 
+  // DMs arrive via the gateway READY payload, not REST. Refresh the DM
+  // list once the gateway is ready, and live-update on new/closed DMs.
+  await listen("gateway-ready", async () => {
+    state.dms = await invoke("get_dms");
+    if (state.activeGuild === "dm") renderChannelList();
+  });
+
+  await listen("dm-create", (event) => {
+    state.dms.push(event.payload);
+    if (state.activeGuild === "dm") renderChannelList();
+  });
+
+  await listen("dm-delete", (event) => {
+    const id = String(event.payload.id);
+    state.dms = state.dms.filter((c) => String(c.id) !== id);
+    if (state.activeGuild === "dm") renderChannelList();
+  });
+
   await listen("gateway-closed", (event) => {
     console.error("gateway closed:", event.payload);
   });
