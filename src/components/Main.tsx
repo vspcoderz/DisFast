@@ -10,12 +10,17 @@ export interface ActiveChannel {
   name: string;
 }
 
+function channelKey(ch: ActiveChannel): string {
+  return ch.id;
+}
+
 export function Main({ user }: { user: User }) {
   const [guilds, setGuilds] = useState<Guild[]>([]);
   const [dms, setDms] = useState<Channel[]>([]);
   const [channels, setChannels] = useState<Channel[]>([]);
   const [activeGuild, setActiveGuild] = useState<GuildSelection>("dm");
   const [activeChannel, setActiveChannel] = useState<ActiveChannel | null>(null);
+  const [paneOpen, setPaneOpen] = useState(false);
   const [error, setError] = useState("");
 
   // Load guild list once.
@@ -62,12 +67,13 @@ export function Main({ user }: { user: User }) {
 
   const selectChannel = useCallback((id: string, name: string) => {
     setActiveChannel({ id, name });
+    setPaneOpen(false); // auto-close the overlay pane on narrow screens
   }, []);
 
   const guild = guilds.find((g) => g.id === activeGuild) ?? null;
 
   return (
-    <div className="app-view">
+    <div className={`app-view${paneOpen ? " pane-open" : ""}`}>
       <GuildSidebar
         guilds={guilds}
         activeGuild={activeGuild}
@@ -83,10 +89,19 @@ export function Main({ user }: { user: User }) {
         onSelect={selectChannel}
       />
       {activeChannel ? (
-        <ChatPane key={activeChannel.id} channel={activeChannel} />
+        <ChatPane
+          key={channelKey(activeChannel)}
+          channel={activeChannel}
+          onTogglePane={() => setPaneOpen((v) => !v)}
+        />
       ) : (
         <main className="chat-pane">
-          <header className="chat-header">Select a channel</header>
+          <header className="chat-header">
+            <button className="pane-toggle" onClick={() => setPaneOpen((v) => !v)} title="Channels">
+              ☰
+            </button>
+            <span>Select a channel</span>
+          </header>
         </main>
       )}
       {error && <div className="error-toast">{error}</div>}

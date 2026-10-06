@@ -1,6 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { Channel, Guild, Message, MessageDeletePayload, User } from "./types";
+import type {
+  Channel,
+  Guild,
+  Message,
+  MessageDeletePayload,
+  MessageUpdatePayload,
+  User,
+} from "./types";
 
 /**
  * Typed boundary over the Rust commands. Arg names are camelCase here;
@@ -28,6 +35,10 @@ export const events = {
     cb: (payload: MessageDeletePayload) => void,
   ): Promise<UnlistenFn> =>
     listen<MessageDeletePayload>("message-delete", (e) => cb(e.payload)),
+  onMessageUpdate: (
+    cb: (payload: MessageUpdatePayload) => void,
+  ): Promise<UnlistenFn> =>
+    listen<MessageUpdatePayload>("message-update", (e) => cb(e.payload)),
   onGatewayReady: (cb: () => void): Promise<UnlistenFn> =>
     listen("gateway-ready", () => cb()),
   onGatewayClosed: (cb: (reason: string) => void): Promise<UnlistenFn> =>
