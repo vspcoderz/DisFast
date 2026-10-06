@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import { renderMarkdown } from "../markdown";
 import type { UserProfileResponse } from "../types";
-import { avatarUrl, displayName } from "../utils";
+import { displayName } from "../utils";
+import { Avatar } from "./Avatar";
 
 /** Discord snowflake IDs embed a Unix timestamp (ms since Discord epoch). */
 const DISCORD_EPOCH = 1420070400000n;
@@ -50,9 +51,6 @@ export function ProfilePanel({ userId }: { userId: string }) {
   const bannerUrl = user.banner
     ? `https://cdn.discordapp.com/banners/${user.id}/${user.banner}.${user.banner.startsWith("a_") ? "gif" : "webp"}?size=480`
     : null;
-  const decorationUrl = user.avatar_decoration_data?.asset
-    ? `https://cdn.discordapp.com/avatar-decoration-presets/${user.avatar_decoration_data.asset}.png`
-    : null;
   const clan = user.clan;
   const clanBadgeUrl =
     clan && clan.identity_enabled
@@ -70,10 +68,7 @@ export function ProfilePanel({ userId }: { userId: string }) {
         }}
       />
       <div className="profile-avatar-wrap">
-        <img className="profile-avatar" src={avatarUrl(user)} alt="" />
-        {decorationUrl && (
-          <img className="profile-decoration" src={decorationUrl} alt="" loading="lazy" />
-        )}
+        <Avatar user={user} size={84} />
       </div>
       <div className="profile-card">
         <div className="profile-name-row">
@@ -82,10 +77,10 @@ export function ProfilePanel({ userId }: { userId: string }) {
         </div>
         <div className="profile-username">@{user.username}</div>
         {clanBadgeUrl && clan && (
-          <div className="profile-clan">
+          <span className="clan-badge">
             <img src={clanBadgeUrl} alt="" loading="lazy" />
-            <span>{clan.tag}</span>
-          </div>
+            {clan.tag}
+          </span>
         )}
         {profile.user_profile?.pronouns && (
           <div className="profile-pronouns">{profile.user_profile.pronouns}</div>

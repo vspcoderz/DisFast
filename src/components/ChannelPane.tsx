@@ -1,5 +1,6 @@
 import type { Channel, GatewayStatus, Guild, GuildSelection, User } from "../types";
 import { avatarUrl, displayName, dmChannelName } from "../utils";
+import { Avatar } from "./Avatar";
 
 export interface DmTarget {
   recipientId?: string;
@@ -74,6 +75,7 @@ export function ChannelPane({
                     )
                   }
                 >
+                  {recipient && <Avatar user={recipient} size={24} />}
                   <span className="channel-name">{name}</span>
                   <UnreadBadge count={unread} />
                 </div>
@@ -95,7 +97,7 @@ export function ChannelPane({
       </div>
       <footer className="user-bar">
         <span className={`status-dot ${gatewayStatus}`} title={`Gateway: ${gatewayStatus}`} />
-        <img src={avatarUrl(user)} alt="" />
+        <Avatar user={user} size={30} />
         <span>{displayName(user)}</span>
       </footer>
     </aside>

@@ -1,8 +1,9 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api, events } from "../api";
+import { Avatar } from "./Avatar";
 import { renderMarkdown } from "../markdown";
 import { IS_COMPONENTS_V2, type Message } from "../types";
-import { avatarUrl, displayName, formatTime } from "../utils";
+import { displayName, formatTime } from "../utils";
 import type { ActiveChannel } from "./Main";
 import { ComponentView, EmbedView } from "./RichContent";
 
@@ -12,7 +13,7 @@ const MessageRow = memo(function MessageRow({ msg }: { msg: Message }) {
   const isV2 = ((msg.flags ?? 0) & IS_COMPONENTS_V2) !== 0;
   return (
     <div className="message" data-id={msg.id}>
-      <img className="avatar" src={avatarUrl(msg.author)} alt="" loading="lazy" />
+      <Avatar user={msg.author} size={38} />
       <div className="body">
         <div className="meta">
           <span className="author">{displayName(msg.author)}</span>

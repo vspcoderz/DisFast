@@ -335,11 +335,24 @@ body,
   background: rgba(0, 0, 0, 0.15);
 }
 
-.message .avatar {
-  width: 38px;
-  height: 38px;
-  border-radius: 50%;
+.avatar-wrap {
+  position: relative;
+  display: inline-flex;
   flex-shrink: 0;
+}
+
+.avatar-img {
+  border-radius: 50%;
+  display: block;
+  object-fit: cover;
+}
+
+.avatar-deco {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
 }
 
 .message .body {
@@ -594,28 +607,8 @@ body,
 }
 
 .profile-avatar-wrap {
-  position: relative;
-  width: 84px;
-  height: 84px;
   margin: -48px 0 0 16px;
   z-index: 1;
-}
-
-.profile-avatar {
-  width: 84px;
-  height: 84px;
-  border-radius: 50%;
-  border: 6px solid var(--bg-2);
-  display: block;
-  background: var(--bg-2);
-}
-
-.profile-decoration {
-  position: absolute;
-  inset: -6px;
-  width: 96px;
-  height: 96px;
-  pointer-events: none;
 }
 
 .profile-name-row {
@@ -636,17 +629,24 @@ body,
   letter-spacing: 0.5px;
 }
 
-.profile-clan {
-  display: flex;
+.clan-badge {
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  font-weight: 600;
+  gap: 5px;
+  background: linear-gradient(90deg, #5865f2, #8b5cf6);
+  color: white;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  width: fit-content;
 }
 
-.profile-clan img {
-  width: 16px;
-  height: 16px;
+.clan-badge img {
+  width: 14px;
+  height: 14px;
   border-radius: 3px;
 }
 

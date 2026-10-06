@@ -3,6 +3,12 @@ export interface User {
   username: string;
   global_name: string | null;
   avatar: string | null;
+  /** Avatar decoration (animated overlay), when known */
+  avatar_decoration_data?: {
+    asset: string;
+    sku_id: string;
+    expires_at: string | null;
+  } | null;
 }
 
 export interface Guild {

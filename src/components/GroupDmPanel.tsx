@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { api } from "../api";
 import type { User } from "../types";
-import { avatarUrl, displayName } from "../utils";
+import { displayName } from "../utils";
+import { Avatar } from "./Avatar";
 
 interface Props {
   channelId: string;
@@ -37,7 +38,7 @@ export function GroupDmPanel({ channelId, name, members }: Props) {
       <div className="member-list">
         {members.map((m) => (
           <div key={m.id} className="member-item">
-            <img className="member-avatar" src={avatarUrl(m)} alt="" loading="lazy" />
+            <Avatar user={m} size={32} />
             <span className="member-name">{displayName(m)}</span>
           </div>
         ))}
