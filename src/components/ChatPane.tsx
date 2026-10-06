@@ -217,7 +217,7 @@ export function ChatPane({ channel, onTogglePane, onToggleProfile }: Props) {
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder={`Search ${channel.name.replace(/^#\s*/, "")}`}
+              placeholder={`Search ${channel.recipientUsername ?? channel.name.replace(/^#\s*/, "")}`}
             />
             <Search size={14} className="chat-search-icon" />
           </div>

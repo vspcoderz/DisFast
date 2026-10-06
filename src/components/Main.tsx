@@ -3,7 +3,7 @@ import { Menu } from "lucide-react";
 import { api, events } from "../api";
 import type { Channel, Guild, GuildSelection, User } from "../types";
 import { GuildSidebar } from "./GuildSidebar";
-import { ChannelPane } from "./ChannelPane";
+import { ChannelPane, type DmTarget } from "./ChannelPane";
 import { ChatPane } from "./ChatPane";
 import { ProfilePanel } from "./ProfilePanel";
 
@@ -14,6 +14,8 @@ export interface ActiveChannel {
   recipientId?: string;
   /** Avatar URL for 1:1 DMs, shown in the chat header. */
   recipientAvatar?: string;
+  /** Username for 1:1 DMs, used in the search placeholder. */
+  recipientUsername?: string;
 }
 
 function channelKey(ch: ActiveChannel): string {
@@ -73,14 +75,11 @@ export function Main({ user }: { user: User }) {
 
   const [showProfile, setShowProfile] = useState(true);
 
-  const selectChannel = useCallback(
-    (id: string, name: string, recipientId?: string, recipientAvatar?: string) => {
-      setActiveChannel({ id, name, recipientId, recipientAvatar });
-      setShowProfile(true);
-      setPaneOpen(false); // auto-close the overlay pane on narrow screens
-    },
-    [],
-  );
+  const selectChannel = useCallback((id: string, name: string, dm?: DmTarget) => {
+    setActiveChannel({ id, name, ...dm });
+    setShowProfile(true);
+    setPaneOpen(false); // auto-close the overlay pane on narrow screens
+  }, []);
 
   const guild = guilds.find((g) => g.id === activeGuild) ?? null;
 

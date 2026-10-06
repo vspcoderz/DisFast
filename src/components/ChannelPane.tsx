@@ -1,6 +1,12 @@
 import type { Channel, Guild, GuildSelection, User } from "../types";
 import { avatarUrl, displayName, dmChannelName } from "../utils";
 
+export interface DmTarget {
+  recipientId?: string;
+  recipientAvatar?: string;
+  recipientUsername?: string;
+}
+
 interface Props {
   selection: GuildSelection;
   guild: Guild | null;
@@ -8,7 +14,7 @@ interface Props {
   channels: Channel[];
   activeChannelId: string | null;
   user: User;
-  onSelect: (id: string, name: string, recipientId?: string, recipientAvatar?: string) => void;
+  onSelect: (id: string, name: string, dm?: DmTarget) => void;
 }
 
 export function ChannelPane({
@@ -41,7 +47,15 @@ export function ChannelPane({
                   key={ch.id}
                   className={`channel-item${activeChannelId === ch.id ? " active" : ""}`}
                   onClick={() =>
-                    onSelect(ch.id, name, recipient?.id, recipient && avatarUrl(recipient))
+                    onSelect(
+                      ch.id,
+                      name,
+                      recipient && {
+                        recipientId: recipient.id,
+                        recipientAvatar: avatarUrl(recipient),
+                        recipientUsername: recipient.username,
+                      },
+                    )
                   }
                 >
                   {name}
