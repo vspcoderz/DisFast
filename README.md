@@ -1,7 +1,8 @@
 # DisFast
 
-A fast, lightweight Discord client. Native Rust backend (Tauri + `twilight`),
-zero-framework frontend, no Electron, no Chromium bundle.
+A fast, lightweight Discord client. Native Rust backend (Tauri +
+`twilight-gateway` + `reqwest`), React + TypeScript frontend (Vite).
+No Electron, no Chromium bundle.
 
 > **Warning:** Third-party clients using your account token violate Discord's
 > Terms of Service. Enforcement is rare but account bans do happen.
@@ -19,13 +20,17 @@ zero-framework frontend, no Electron, no Chromium bundle.
 ## Run it
 
 ```sh
-npm install   # once, for the Tauri CLI
-npm run dev   # dev mode with hot reload
-npm run build # release binary (in src-tauri/target/release/bundle)
+npm install         # once — Vite, React, Tauri CLI
+npm run tauri:dev   # dev mode: Vite hot-reload + Rust backend
+npm run tauri:build # release binary (in src-tauri/target/release/bundle)
 ```
 
 Requires: Rust toolchain, a system WebView (`webkit2gtk-4.1` on Linux —
 already present on most desktops).
+
+In debug builds the app auto-logs-in from `secret.env` in the project root
+(format: `key="your-token"`). That file is gitignored — never commit it.
+Release builds never read token files.
 
 ## Roadmap
 

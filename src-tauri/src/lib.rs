@@ -1,36 +1,63 @@
 use std::sync::Arc;
 
 use futures_util::StreamExt as _;
+use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, USER_AGENT};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::Mutex;
 use twilight_gateway::error::ReceiveMessageErrorType;
 use twilight_gateway::{Intents, Message, Shard, ShardId};
-use twilight_http::Client as HttpClient;
-use twilight_model::id::Id;
+
+const API_BASE: &str = "https://discord.com/api/v9";
 
 /// Everything we hold after a successful login.
 struct DiscordSession {
-    http: Arc<HttpClient>,
+    http: reqwest::Client,
     /// DM channels as raw gateway JSON, populated from the READY payload
     /// and kept up to date via CHANNEL_CREATE/CHANNEL_DELETE events.
-    /// (twilight's typed `Ready` drops the user-account-only
-    /// `private_channels` field, so we keep the raw JSON.)
+    /// (User-account DMs aren't listable over REST; they arrive via the
+    /// gateway `READY.private_channels` field.)
     dms: SharedDms,
 }
 
 type SharedSession = Arc<Mutex<Option<DiscordSession>>>;
 type SharedDms = Arc<Mutex<Vec<serde_json::Value>>>;
 
-fn to_json<T: Serialize>(value: &T) -> Result<serde_json::Value, String> {
-    serde_json::to_value(value).map_err(|e| e.to_string())
+/// Build an HTTP client that sends the token *raw* in the Authorization
+/// header, as user accounts require. (Discord HTTP libraries for bots
+/// force-prefix `Bot `, which is why we use reqwest directly.)
+fn build_http(token: &str) -> Result<reqwest::Client, String> {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        AUTHORIZATION,
+        HeaderValue::from_str(token).map_err(|e| format!("bad token characters: {e}"))?,
+    );
+    headers.insert(USER_AGENT, HeaderValue::from_static("DisFast/0.1"));
+    reqwest::Client::builder()
+        .default_headers(headers)
+        .build()
+        .map_err(|e| e.to_string())
 }
 
-async fn http(state: &State<'_, SharedSession>) -> Result<Arc<HttpClient>, String> {
+async fn get_json(http: &reqwest::Client, path: &str) -> Result<serde_json::Value, String> {
+    let res = http
+        .get(format!("{API_BASE}{path}"))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let status = res.status();
+    if !status.is_success() {
+        let body = res.text().await.unwrap_or_default();
+        return Err(format!("GET {path} failed ({status}): {body}"));
+    }
+    res.json().await.map_err(|e| e.to_string())
+}
+
+async fn http(state: &State<'_, SharedSession>) -> Result<reqwest::Client, String> {
     let guard = state.inner().lock().await;
     guard
         .as_ref()
-        .map(|s| Arc::clone(&s.http))
+        .map(|s| s.http.clone())
         .ok_or_else(|| "not logged in".to_string())
 }
 
@@ -123,16 +150,12 @@ async fn login(
     token: String,
 ) -> Result<serde_json::Value, String> {
     let token = token.trim().to_string();
-    let client = Arc::new(HttpClient::new(token.clone()));
+    let client = build_http(&token)?;
 
     // Validate the token by fetching the current user.
-    let user = client
-        .current_user()
+    let user = get_json(&client, "/users/@me")
         .await
-        .map_err(|e| format!("invalid token or network error: {e}"))?
-        .model()
-        .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| format!("invalid token or network error: {e}"))?;
 
     // Start the gateway only once per session.
     let mut guard = state.inner().lock().await;
@@ -151,20 +174,13 @@ async fn login(
         });
     }
 
-    to_json(&user)
+    Ok(user)
 }
 
 #[tauri::command]
 async fn get_guilds(state: State<'_, SharedSession>) -> Result<serde_json::Value, String> {
     let http = http(&state).await?;
-    let guilds = http
-        .current_user_guilds()
-        .await
-        .map_err(|e| e.to_string())?
-        .models()
-        .await
-        .map_err(|e| e.to_string())?;
-    to_json(&guilds)
+    get_json(&http, "/users/@me/guilds").await
 }
 
 #[tauri::command]
@@ -172,49 +188,36 @@ async fn get_dms(state: State<'_, SharedSession>) -> Result<serde_json::Value, S
     let guard = state.inner().lock().await;
     let session = guard.as_ref().ok_or("not logged in")?;
     let dms = session.dms.lock().await;
-    to_json(&*dms)
+    Ok(serde_json::Value::Array(dms.clone()))
 }
 
 #[tauri::command]
 async fn get_channels(
     state: State<'_, SharedSession>,
-    guild_id: u64,
+    guild_id: String,
 ) -> Result<serde_json::Value, String> {
     let http = http(&state).await?;
-    let channels = http
-        .guild_channels(Id::new(guild_id))
-        .await
-        .map_err(|e| e.to_string())?
-        .models()
-        .await
-        .map_err(|e| e.to_string())?;
-    to_json(&channels)
+    get_json(&http, &format!("/guilds/{guild_id}/channels")).await
 }
 
 #[tauri::command]
 async fn get_messages(
     state: State<'_, SharedSession>,
-    channel_id: u64,
-    before: Option<u64>,
+    channel_id: String,
+    before: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let http = http(&state).await?;
-    let base = http.channel_messages(Id::new(channel_id)).limit(50);
-    let response = match before {
-        Some(before) => base.before(Id::new(before)).await,
-        None => base.await,
-    };
-    let messages = response
-        .map_err(|e| e.to_string())?
-        .models()
-        .await
-        .map_err(|e| e.to_string())?;
-    to_json(&messages)
+    let mut path = format!("/channels/{channel_id}/messages?limit=50");
+    if let Some(before) = before {
+        path.push_str(&format!("&before={before}"));
+    }
+    get_json(&http, &path).await
 }
 
 #[tauri::command]
 async fn send_message(
     state: State<'_, SharedSession>,
-    channel_id: u64,
+    channel_id: String,
     content: String,
 ) -> Result<serde_json::Value, String> {
     let http = http(&state).await?;
@@ -222,15 +225,36 @@ async fn send_message(
     if content.is_empty() {
         return Err("empty message".to_string());
     }
-    let message = http
-        .create_message(Id::new(channel_id))
-        .content(&content)
-        .await
-        .map_err(|e| e.to_string())?
-        .model()
+    let res = http
+        .post(format!("{API_BASE}/channels/{channel_id}/messages"))
+        .json(&serde_json::json!({ "content": content }))
+        .send()
         .await
         .map_err(|e| e.to_string())?;
-    to_json(&message)
+    let status = res.status();
+    if !status.is_success() {
+        let body = res.text().await.unwrap_or_default();
+        return Err(format!("send failed ({status}): {body}"));
+    }
+    res.json().await.map_err(|e| e.to_string())
+}
+
+/// Dev convenience: read a token from `secret.env` in the project root
+/// (format: `key="token"`). Only available in debug builds; the release
+/// binary never touches the filesystem for tokens.
+#[tauri::command]
+fn get_dev_token() -> Option<String> {
+    #[cfg(debug_assertions)]
+    {
+        let content = std::fs::read_to_string("../secret.env").ok()?;
+        let start = content.find('"')? + 1;
+        let end = content.rfind('"')?;
+        (end > start).then(|| content[start..end].to_string())
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        None
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -244,6 +268,7 @@ pub fn run() {
             get_channels,
             get_messages,
             send_message,
+            get_dev_token,
         ])
         .run(tauri::generate_context!())
         .expect("error while running DisFast");
