@@ -9,7 +9,7 @@ import { ComponentView, EmbedView } from "./RichContent";
 // Memoized so a new incoming message doesn't re-render the whole history —
 // the main source of "lag when messages arrive".
 const MessageRow = memo(function MessageRow({ msg }: { msg: Message }) {
-  const isV2 = (msg.flags ?? 0) & IS_COMPONENTS_V2;
+  const isV2 = ((msg.flags ?? 0) & IS_COMPONENTS_V2) !== 0;
   return (
     <div className="message" data-id={msg.id}>
       <img className="avatar" src={avatarUrl(msg.author)} alt="" loading="lazy" />
