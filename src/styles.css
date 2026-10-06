@@ -18,6 +18,8 @@ html,
 body,
 #root {
   height: 100%;
+  /* The window itself never scrolls — only the inner panes do */
+  overflow: hidden;
   font-family: "gg sans", "Helvetica Neue", Arial, sans-serif;
   background: var(--bg-1);
   color: var(--text);
@@ -101,10 +103,21 @@ body,
 /* ---------- Layout ---------- */
 .app-view {
   height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
   display: grid;
   /* minmax(0, 1fr) is the key: without it the chat column refuses to
      shrink below its widest content and the window scrolls horizontally */
   grid-template-columns: 68px 240px minmax(0, 1fr);
+}
+
+/* Grid/flex children default to min-height:auto, which lets tall content
+   blow out the layout and scroll the whole window. min-height:0 lets the
+   panes shrink so their inner lists do the scrolling instead. */
+.chat-pane,
+.channel-pane,
+.guild-sidebar {
+  min-height: 0;
 }
 
 .guild-sidebar {
@@ -166,6 +179,7 @@ body,
 
 .channel-list {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 8px;
 }
@@ -222,6 +236,7 @@ body,
 
 .message-list {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
   min-width: 0;
@@ -277,7 +292,7 @@ body,
 }
 
 .message .content {
-  overflow-wrap: break-word;
+  overflow-wrap: anywhere;
   line-height: 1.4;
 }
 
