@@ -105,11 +105,28 @@ export interface UserProfileResponse {
     banner?: string | null;
     accent_color?: number | null;
     bot?: boolean;
+    /** Avatar decoration (animated overlay) */
+    avatar_decoration_data?: {
+      asset: string;
+      sku_id: string;
+      expires_at: string | null;
+    } | null;
+    /** Clan / primary guild badge */
+    clan?: {
+      identity_guild_id: string;
+      identity_enabled: boolean;
+      tag: string;
+      badge: string;
+    } | null;
   };
+  /** 0 = none, 1 = Nitro Classic, 2 = Nitro, 3 = Nitro Basic */
+  premium_type?: number;
+  premium_since?: string | null;
   user_profile?: {
     bio?: string;
     accent_color?: number | null;
     banner?: string | null;
     pronouns?: string;
+    theme_colors?: number[];
   };
 }

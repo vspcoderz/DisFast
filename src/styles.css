@@ -593,17 +593,61 @@ body,
   background-position: center;
 }
 
+.profile-avatar-wrap {
+  position: relative;
+  width: 84px;
+  height: 84px;
+  margin: -48px 0 0 16px;
+  z-index: 1;
+}
+
 .profile-avatar {
   width: 84px;
   height: 84px;
   border-radius: 50%;
   border: 6px solid var(--bg-2);
-  margin: -48px 0 0 16px;
   display: block;
   background: var(--bg-2);
-  /* Must render above the card it overlaps */
-  position: relative;
-  z-index: 1;
+}
+
+.profile-decoration {
+  position: absolute;
+  inset: -6px;
+  width: 96px;
+  height: 96px;
+  pointer-events: none;
+}
+
+.profile-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.nitro-badge {
+  background: linear-gradient(90deg, #8b5cf6, #ec4899);
+  color: white;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.profile-clan {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.profile-clan img {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
 }
 
 .profile-card {
