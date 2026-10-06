@@ -10,6 +10,7 @@ const state = {
   activeGuild: null, // "dm" or guild id string
   activeChannel: null, // channel id string
   activeChannelName: "",
+  oldestMessageId: null, // for history paging; null = no more history
 };
 
 // ---------- Helpers ----------
@@ -142,6 +143,24 @@ function renderUserBar() {
   bar.appendChild(el("span", null, state.user.global_name || state.user.username));
 }
 
+// Minimal markdown renderer: escapes HTML first, then applies a small
+// set of Discord-style patterns. Deliberately tiny — no parser library.
+function renderMarkdown(text) {
+  const esc = text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  return esc
+    .replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => `<pre><code>${code}</code></pre>`)
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/(^|\W)\*([^*]+)\*/g, "$1<em>$2</em>")
+    .replace(/__([^_]+)__/g, "<u>$1</u>")
+    .replace(/~~([^~]+)~~/g, "<s>$1</s>")
+    .replace(/&gt; (.+)/g, "<blockquote>$1</blockquote>")
+    .replace(/\n/g, "<br>");
+}
+
 function renderMessage(msg) {
   const row = el("div", "message");
   row.dataset.id = String(msg.id);
@@ -158,7 +177,8 @@ function renderMessage(msg) {
   meta.appendChild(el("span", "time", formatTime(msg.timestamp)));
   body.appendChild(meta);
 
-  const content = el("div", "content", msg.content || "");
+  const content = el("div", "content");
+  content.innerHTML = renderMarkdown(msg.content || "");
   body.appendChild(content);
 
   // Render attachments (images inline)
@@ -216,12 +236,43 @@ async function selectChannel(channelId, name) {
 
   const list = $("#message-list");
   list.innerHTML = "";
+  state.oldestMessageId = null;
   // API returns newest first; flip for display
   const messages = await invoke("get_messages", { channelId: Number(channelId) });
   for (const msg of messages.reverse()) {
     list.appendChild(renderMessage(msg));
   }
+  if (messages.length) state.oldestMessageId = String(messages[0].id);
   scrollToBottom();
+}
+
+// Load older messages when scrolled near the top.
+let loadingHistory = false;
+async function loadOlderMessages() {
+  if (loadingHistory || !state.activeChannel || !state.oldestMessageId) return;
+  loadingHistory = true;
+  const list = $("#message-list");
+  try {
+    const messages = await invoke("get_messages", {
+      channelId: Number(state.activeChannel),
+      before: Number(state.oldestMessageId),
+    });
+    if (!messages.length) {
+      state.oldestMessageId = null; // no more history
+      return;
+    }
+    // Keep the viewport anchored on the same message after prepending.
+    const prevHeight = list.scrollHeight;
+    const frag = document.createDocumentFragment();
+    for (const msg of messages.reverse()) {
+      frag.appendChild(renderMessage(msg));
+    }
+    list.prepend(frag);
+    list.scrollTop += list.scrollHeight - prevHeight;
+    state.oldestMessageId = String(messages[0].id);
+  } finally {
+    loadingHistory = false;
+  }
 }
 
 async function doLogin(token) {
@@ -309,6 +360,9 @@ function boot() {
   });
   $("#composer-input").addEventListener("keydown", (e) => {
     if (e.key === "Enter") sendCurrentMessage();
+  });
+  $("#message-list").addEventListener("scroll", (e) => {
+    if (e.target.scrollTop < 100) loadOlderMessages();
   });
 
   setupEvents();

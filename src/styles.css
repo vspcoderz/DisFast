@@ -265,6 +265,34 @@ body {
   line-height: 1.4;
 }
 
+.message .content code {
+  background: var(--bg-0);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 13px;
+}
+
+.message .content pre {
+  background: var(--bg-0);
+  padding: 10px;
+  border-radius: 6px;
+  margin: 6px 0;
+  overflow-x: auto;
+}
+
+.message .content pre code {
+  padding: 0;
+  background: none;
+}
+
+.message .content blockquote {
+  border-left: 3px solid var(--bg-3);
+  padding-left: 10px;
+  color: var(--text-dim);
+  display: inline-block;
+  margin: 0;
+}
+
 .composer {
   padding: 0 16px 18px;
 }
