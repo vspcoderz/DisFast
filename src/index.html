@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DisFast</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <!-- Login screen -->
+    <div id="login-view" class="login-view">
+      <div class="login-card">
+        <h1>DisFast</h1>
+        <p class="subtitle">Discord, minus the weight.</p>
+        <input
+          id="token-input"
+          type="password"
+          placeholder="Your Discord token"
+          autocomplete="off"
+        />
+        <button id="login-btn">Log in</button>
+        <p id="login-error" class="error"></p>
+        <details class="token-help">
+          <summary>How do I get my token?</summary>
+          <ol>
+            <li>Open discord.com in a browser and log in.</li>
+            <li>Open DevTools (F12) → Network tab.</li>
+            <li>Refresh, click any request to <code>discord.com/api</code>.</li>
+            <li>Copy the <code>Authorization</code> header value.</li>
+          </ol>
+          <p class="warn">
+            Note: third-party clients violate Discord's ToS. Rare, but bans
+            happen. Use at your own risk — never share your token.
+          </p>
+        </details>
+      </div>
+    </div>
+
+    <!-- Main app -->
+    <div id="app-view" class="app-view hidden">
+      <nav id="guild-sidebar" class="guild-sidebar"></nav>
+      <aside class="channel-pane">
+        <header id="guild-header" class="guild-header">DisFast</header>
+        <div id="channel-list" class="channel-list"></div>
+        <footer id="user-bar" class="user-bar"></footer>
+      </aside>
+      <main class="chat-pane">
+        <header id="chat-header" class="chat-header">
+          <span id="chat-title">Select a channel</span>
+        </header>
+        <div id="message-list" class="message-list"></div>
+        <div class="composer">
+          <input
+            id="composer-input"
+            type="text"
+            placeholder="Message"
+            autocomplete="off"
+          />
+        </div>
+      </main>
+    </div>
+
+    <script src="main.js"></script>
+  </body>
+</html>
