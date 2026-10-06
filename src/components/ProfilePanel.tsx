@@ -93,19 +93,19 @@ export function ProfilePanel({ userId }: { userId: string }) {
           <div className="profile-name">{name}</div>
           {nitroName && <span className="nitro-badge">{nitroName}</span>}
         </div>
-        <div className="profile-username">
-          @{user.username}
+        <div className="profile-subline">
+          <span className="profile-username">@{user.username}</span>
           {pronouns && <span className="profile-pronouns-inline">• {pronouns}</span>}
+          {clanBadgeUrl && clan && (
+            <span className="clan-badge">
+              <img src={clanBadgeUrl} alt="" loading="lazy" />
+              {clan.tag}
+            </span>
+          )}
+          {mutualCount > 0 && (
+            <span className="profile-mutual-inline">• {mutualCount} Mutual Servers</span>
+          )}
         </div>
-        {clanBadgeUrl && clan && (
-          <span className="clan-badge">
-            <img src={clanBadgeUrl} alt="" loading="lazy" />
-            {clan.tag}
-          </span>
-        )}
-        {mutualCount > 0 && (
-          <div className="profile-mutual">{mutualCount} Mutual Servers</div>
-        )}
         {badges.length > 0 && (
           <div className="profile-badges">
             {badges.map((b) => (
