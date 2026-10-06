@@ -497,6 +497,85 @@ body,
   height: 8px;
 }
 
+/* ---------- DM profile panel ---------- */
+.app-view.with-profile {
+  grid-template-columns: 68px 240px minmax(0, 1fr) 300px;
+}
+
+.profile-panel {
+  background: var(--bg-2);
+  overflow-y: auto;
+  min-height: 0;
+  position: relative;
+}
+
+.profile-panel.loading,
+.profile-panel.error {
+  padding: 16px;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.profile-banner {
+  height: 110px;
+  background-size: cover;
+  background-position: center;
+}
+
+.profile-avatar {
+  width: 84px;
+  height: 84px;
+  border-radius: 50%;
+  border: 6px solid var(--bg-2);
+  margin: -48px 0 0 16px;
+  display: block;
+  background: var(--bg-2);
+}
+
+.profile-card {
+  margin: 10px 14px 16px;
+  padding: 14px;
+  background: var(--bg-1);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.profile-name {
+  font-size: 19px;
+  font-weight: 800;
+  overflow-wrap: break-word;
+}
+
+.profile-username {
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.profile-pronouns {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.profile-section-title {
+  margin-top: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.profile-bio {
+  font-size: 13px;
+  line-height: 1.4;
+  overflow-wrap: break-word;
+}
+
+.profile-since {
+  font-size: 13px;
+}
+
 /* ---------- Responsive ---------- */
 .pane-toggle {
   display: none;
@@ -511,19 +590,104 @@ body,
 .chat-header {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
   min-width: 0;
 }
 
-.chat-header span {
+.chat-header-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.chat-header-name {
+  font-weight: 700;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
+.chat-header-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.icon-btn:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--bg-3);
+}
+
+.icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.chat-search {
+  position: relative;
+  margin-left: 8px;
+}
+
+.chat-search input {
+  width: 180px;
+  padding: 5px 28px 5px 8px;
+  border: none;
+  border-radius: 4px;
+  background: var(--bg-0);
+  color: var(--text);
+  font-size: 13px;
+  transition: width 0.15s ease;
+}
+
+.chat-search input:focus {
+  outline: none;
+  width: 240px;
+}
+
+.chat-search-icon {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-dim);
+  pointer-events: none;
+}
+
+@media (max-width: 800px) {
+  .chat-search input {
+    width: 110px;
+  }
+
+  .chat-search input:focus {
+    width: 140px;
+  }
+}
+
 @media (max-width: 1100px) {
-  .app-view {
+  .app-view,
+  .app-view.with-profile {
     grid-template-columns: 60px 200px minmax(0, 1fr);
+  }
+
+  /* Not enough room — drop the profile panel first */
+  .profile-panel {
+    display: none;
   }
 }
 

@@ -7,6 +7,7 @@ import type {
   MessageDeletePayload,
   MessageUpdatePayload,
   User,
+  UserProfileResponse,
 } from "./types";
 
 /**
@@ -24,6 +25,8 @@ export const api = {
     invoke<Message[]>("get_messages", { channelId, before }),
   sendMessage: (channelId: string, content: string) =>
     invoke<Message>("send_message", { channelId, content }),
+  getUserProfile: (userId: string) =>
+    invoke<UserProfileResponse>("get_user_profile", { userId }),
   /** Debug builds only; null in release. */
   getDevToken: () => invoke<string | null>("get_dev_token"),
 };

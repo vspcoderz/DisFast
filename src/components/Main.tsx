@@ -1,13 +1,19 @@
 import { useCallback, useEffect, useState } from "react";
+import { Menu } from "lucide-react";
 import { api, events } from "../api";
 import type { Channel, Guild, GuildSelection, User } from "../types";
 import { GuildSidebar } from "./GuildSidebar";
 import { ChannelPane } from "./ChannelPane";
 import { ChatPane } from "./ChatPane";
+import { ProfilePanel } from "./ProfilePanel";
 
 export interface ActiveChannel {
   id: string;
   name: string;
+  /** Set for 1:1 DMs — enables the profile side panel. */
+  recipientId?: string;
+  /** Avatar URL for 1:1 DMs, shown in the chat header. */
+  recipientAvatar?: string;
 }
 
 function channelKey(ch: ActiveChannel): string {
@@ -65,15 +71,26 @@ export function Main({ user }: { user: User }) {
     }
   }, []);
 
-  const selectChannel = useCallback((id: string, name: string) => {
-    setActiveChannel({ id, name });
-    setPaneOpen(false); // auto-close the overlay pane on narrow screens
-  }, []);
+  const [showProfile, setShowProfile] = useState(true);
+
+  const selectChannel = useCallback(
+    (id: string, name: string, recipientId?: string, recipientAvatar?: string) => {
+      setActiveChannel({ id, name, recipientId, recipientAvatar });
+      setShowProfile(true);
+      setPaneOpen(false); // auto-close the overlay pane on narrow screens
+    },
+    [],
+  );
 
   const guild = guilds.find((g) => g.id === activeGuild) ?? null;
 
+  const recipientId = activeChannel?.recipientId;
+  const profileVisible = recipientId != null && showProfile;
+
   return (
-    <div className={`app-view${paneOpen ? " pane-open" : ""}`}>
+    <div
+      className={`app-view${paneOpen ? " pane-open" : ""}${profileVisible ? " with-profile" : ""}`}
+    >
       <GuildSidebar
         guilds={guilds}
         activeGuild={activeGuild}
@@ -93,17 +110,19 @@ export function Main({ user }: { user: User }) {
           key={channelKey(activeChannel)}
           channel={activeChannel}
           onTogglePane={() => setPaneOpen((v) => !v)}
+          onToggleProfile={recipientId ? () => setShowProfile((v) => !v) : undefined}
         />
       ) : (
         <main className="chat-pane">
           <header className="chat-header">
-            <button className="pane-toggle" onClick={() => setPaneOpen((v) => !v)} title="Channels">
-              ☰
+            <button className="pane-toggle icon-btn" onClick={() => setPaneOpen((v) => !v)} title="Channels">
+              <Menu size={18} />
             </button>
-            <span>Select a channel</span>
+            <span className="chat-header-name">Select a channel</span>
           </header>
         </main>
       )}
+      {profileVisible && <ProfilePanel userId={recipientId} />}
       {error && <div className="error-toast">{error}</div>}
     </div>
   );

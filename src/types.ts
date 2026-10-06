@@ -91,3 +91,18 @@ export interface MessageDeletePayload {
 export type GuildSelection = "dm" | string;
 
 export const IS_COMPONENTS_V2 = 1 << 15;
+
+/** Response of GET /users/{id}/profile */
+export interface UserProfileResponse {
+  user: User & {
+    banner?: string | null;
+    accent_color?: number | null;
+    bot?: boolean;
+  };
+  user_profile?: {
+    bio?: string;
+    accent_color?: number | null;
+    banner?: string | null;
+    pronouns?: string;
+  };
+}

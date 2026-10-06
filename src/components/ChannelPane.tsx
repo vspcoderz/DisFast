@@ -8,7 +8,7 @@ interface Props {
   channels: Channel[];
   activeChannelId: string | null;
   user: User;
-  onSelect: (id: string, name: string) => void;
+  onSelect: (id: string, name: string, recipientId?: string, recipientAvatar?: string) => void;
 }
 
 export function ChannelPane({
@@ -34,11 +34,15 @@ export function ChannelPane({
         {isDm
           ? dms.map((ch) => {
               const name = dmChannelName(ch);
+              // 1:1 DMs (type 1) enable the profile panel; group DMs don't
+              const recipient = ch.type === 1 ? ch.recipients?.[0] : undefined;
               return (
                 <div
                   key={ch.id}
                   className={`channel-item${activeChannelId === ch.id ? " active" : ""}`}
-                  onClick={() => onSelect(ch.id, name)}
+                  onClick={() =>
+                    onSelect(ch.id, name, recipient?.id, recipient && avatarUrl(recipient))
+                  }
                 >
                   {name}
                 </div>

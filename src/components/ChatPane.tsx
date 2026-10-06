@@ -1,4 +1,5 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Menu, PanelRight, Phone, Pin, Search, UserPlus, Video } from "lucide-react";
 import { api, events } from "../api";
 import { renderMarkdown } from "../markdown";
 import { IS_COMPONENTS_V2, type Message } from "../types";
@@ -54,12 +55,14 @@ const MessageRow = memo(function MessageRow({ msg }: { msg: Message }) {
 interface Props {
   channel: ActiveChannel;
   onTogglePane: () => void;
+  onToggleProfile?: () => void;
 }
 
-export function ChatPane({ channel, onTogglePane }: Props) {
+export function ChatPane({ channel, onTogglePane, onToggleProfile }: Props) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [hasMore, setHasMore] = useState(true);
   const [draft, setDraft] = useState("");
+  const [query, setQuery] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
   const loadingHistory = useRef(false);
   const stickToBottom = useRef(true);
@@ -175,19 +178,57 @@ export function ChatPane({ channel, onTogglePane }: Props) {
     }
   }
 
+  // Client-side search over the loaded conversation (server-side search
+  // with paging is a Phase 2 feature).
+  const q = query.trim().toLowerCase();
+  const visible = q
+    ? messages.filter((m) => m.content.toLowerCase().includes(q))
+    : messages;
+
   return (
     <main className="chat-pane">
       <header className="chat-header">
-        <button className="pane-toggle" onClick={onTogglePane} title="Channels">
-          ☰
+        <button className="pane-toggle icon-btn" onClick={onTogglePane} title="Channels">
+          <Menu size={18} />
         </button>
-        <span>{channel.name}</span>
+        {channel.recipientAvatar && (
+          <img className="chat-header-avatar" src={channel.recipientAvatar} alt="" />
+        )}
+        <span className="chat-header-name">{channel.name}</span>
+        <div className="chat-header-actions">
+          <button className="icon-btn" disabled title="Voice calls — coming in Phase 4">
+            <Phone size={18} />
+          </button>
+          <button className="icon-btn" disabled title="Video calls — coming in Phase 4">
+            <Video size={18} />
+          </button>
+          <button className="icon-btn" disabled title="Pinned messages — coming soon">
+            <Pin size={18} />
+          </button>
+          <button className="icon-btn" disabled title="Add friends to DM — coming soon">
+            <UserPlus size={18} />
+          </button>
+          {onToggleProfile && (
+            <button className="icon-btn" onClick={onToggleProfile} title="Toggle profile panel">
+              <PanelRight size={18} />
+            </button>
+          )}
+          <div className="chat-search">
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={`Search ${channel.name.replace(/^#\s*/, "")}`}
+            />
+            <Search size={14} className="chat-search-icon" />
+          </div>
+        </div>
       </header>
       <div className="message-list" ref={listRef} onScroll={onScroll}>
-        {!hasMore && messages.length > 0 && (
+        {!hasMore && messages.length > 0 && !q && (
           <div className="history-start">Beginning of conversation</div>
         )}
-        {messages.map((m) => (
+        {q && <div className="history-start">{visible.length} result{visible.length === 1 ? "" : "s"}</div>}
+        {visible.map((m) => (
           <MessageRow key={m.id} msg={m} />
         ))}
       </div>

@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 use futures_util::StreamExt as _;
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, USER_AGENT};
-use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::Mutex;
 use twilight_gateway::error::ReceiveMessageErrorType;
@@ -312,6 +311,15 @@ async fn get_messages(
 }
 
 #[tauri::command]
+async fn get_user_profile(
+    state: State<'_, SharedSession>,
+    user_id: String,
+) -> Result<serde_json::Value, String> {
+    let http = http(&state).await?;
+    get_json(&http, &format!("/users/{user_id}/profile")).await
+}
+
+#[tauri::command]
 async fn send_message(
     state: State<'_, SharedSession>,
     channel_id: String,
@@ -365,6 +373,7 @@ pub fn run() {
             get_channels,
             get_messages,
             send_message,
+            get_user_profile,
             get_dev_token,
         ])
         .run(tauri::generate_context!())
