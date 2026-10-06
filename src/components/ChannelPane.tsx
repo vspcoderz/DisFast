@@ -1,4 +1,4 @@
-import type { Channel, Guild, GuildSelection, User } from "../types";
+import type { Channel, GatewayStatus, Guild, GuildSelection, User } from "../types";
 import { avatarUrl, displayName, dmChannelName } from "../utils";
 
 export interface DmTarget {
@@ -14,6 +14,7 @@ interface Props {
   channels: Channel[];
   activeChannelId: string | null;
   unreadChannels: Record<string, number>;
+  gatewayStatus: GatewayStatus;
   user: User;
   onSelect: (id: string, name: string, dm?: DmTarget) => void;
 }
@@ -30,6 +31,7 @@ export function ChannelPane({
   channels,
   activeChannelId,
   unreadChannels,
+  gatewayStatus,
   user,
   onSelect,
 }: Props) {
@@ -86,6 +88,7 @@ export function ChannelPane({
             })}
       </div>
       <footer className="user-bar">
+        <span className={`status-dot ${gatewayStatus}`} title={`Gateway: ${gatewayStatus}`} />
         <img src={avatarUrl(user)} alt="" />
         <span>{displayName(user)}</span>
       </footer>

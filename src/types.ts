@@ -94,6 +94,9 @@ export interface MessageDeletePayload {
 
 export type GuildSelection = "dm" | string;
 
+/** Gateway connection state, shown as a status dot in the user bar. */
+export type GatewayStatus = "connecting" | "reconnecting" | "ready" | "failed";
+
 export const IS_COMPONENTS_V2 = 1 << 15;
 
 /** Response of GET /users/{id}/profile */

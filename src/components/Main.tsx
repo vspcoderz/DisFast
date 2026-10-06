@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Menu, PanelRight, Phone, Pin, Search, UserPlus, Video } from "lucide-react";
 import { api, events } from "../api";
-import type { Channel, Guild, GuildSelection, User } from "../types";
+import type { Channel, GatewayStatus, Guild, GuildSelection, User } from "../types";
 import { GuildSidebar } from "./GuildSidebar";
 import { ChannelPane, type DmTarget } from "./ChannelPane";
 import { ChatPane } from "./ChatPane";
@@ -41,6 +41,7 @@ export function Main({ user }: { user: User }) {
   const [showProfile, setShowProfile] = useState(true);
   const [query, setQuery] = useState("");
   const [error, setError] = useState("");
+  const [gatewayStatus, setGatewayStatus] = useState<GatewayStatus>("connecting");
   /** Unread counts per channel + guilds with any unread. */
   const [unreadChannels, setUnreadChannels] = useState<Record<string, number>>({});
   const [unreadGuilds, setUnreadGuilds] = useState<Set<string>>(new Set());
@@ -79,6 +80,14 @@ export function Main({ user }: { user: User }) {
     return () => {
       alive = false;
       unlisteners.forEach((p) => p.then((unlisten) => unlisten()));
+    };
+  }, []);
+
+  // Gateway connection status → status dot in the user bar.
+  useEffect(() => {
+    const unlisten = events.onGatewayStatus((s) => setGatewayStatus(s));
+    return () => {
+      unlisten.then((f) => f());
     };
   }, []);
 
@@ -166,6 +175,7 @@ export function Main({ user }: { user: User }) {
         channels={channels}
         activeChannelId={activeChannel?.id ?? null}
         unreadChannels={unreadChannels}
+        gatewayStatus={gatewayStatus}
         user={user}
         onSelect={selectChannel}
       />

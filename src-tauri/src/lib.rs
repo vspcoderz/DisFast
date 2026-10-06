@@ -68,18 +68,34 @@ fn build_http(token: &str) -> Result<reqwest::Client, String> {
         .map_err(|e| e.to_string())
 }
 
+/// Extract Discord's retry_after (seconds) from a 429 body.
+fn retry_after(body: &serde_json::Value) -> f64 {
+    body.get("retry_after")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(1.0)
+        + 0.1
+}
+
 async fn get_json(http: &reqwest::Client, path: &str) -> Result<serde_json::Value, String> {
-    let res = http
-        .get(format!("{API_BASE}{path}"))
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    let status = res.status();
-    if !status.is_success() {
-        let body = res.text().await.unwrap_or_default();
-        return Err(format!("GET {path} failed ({status}): {body}"));
+    let url = format!("{API_BASE}{path}");
+    for attempt in 0..3 {
+        let res = http.get(&url).send().await.map_err(|e| e.to_string())?;
+        let status = res.status();
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS && attempt < 2 {
+            // Rate limited: wait it out silently, never surface to the UI.
+            let body = res.json().await.unwrap_or_default();
+            let wait = retry_after(&body);
+            eprintln!("[disfast] rate limited on {path}, retrying in {wait:.1}s");
+            tokio::time::sleep(std::time::Duration::from_secs_f64(wait)).await;
+            continue;
+        }
+        if !status.is_success() {
+            let body = res.text().await.unwrap_or_default();
+            return Err(format!("GET {path} failed ({status}): {body}"));
+        }
+        return res.json().await.map_err(|e| e.to_string());
     }
-    res.json().await.map_err(|e| e.to_string())
+    unreachable!()
 }
 
 async fn http(state: &State<'_, SharedSession>) -> Result<reqwest::Client, String> {
@@ -103,18 +119,48 @@ async fn run_gateway(app: AppHandle, token: String, dms: SharedDms, users: Share
         | Intents::DIRECT_MESSAGES
         | Intents::MESSAGE_CONTENT;
 
-    let mut shard = Shard::new(ShardId::ONE, token, intents);
+    const MAX_ATTEMPTS: u32 = 5;
 
+    for attempt in 1..=MAX_ATTEMPTS {
+        let _ = app.emit("gateway-status", "connecting");
+        eprintln!("[disfast] gateway: connecting (attempt {attempt}/{MAX_ATTEMPTS})");
+
+        let mut shard = Shard::new(ShardId::ONE, token.clone(), intents);
+        pump_events(&app, &mut shard, &dms, &users).await;
+
+        if attempt == MAX_ATTEMPTS {
+            break;
+        }
+        // Exponential backoff, capped at 30s.
+        let backoff = std::cmp::min(30, 1u64 << attempt.min(5));
+        eprintln!("[disfast] gateway: reconnecting in {backoff}s");
+        let _ = app.emit("gateway-status", "reconnecting");
+        tokio::time::sleep(std::time::Duration::from_secs(backoff)).await;
+    }
+
+    eprintln!("[disfast] gateway: gave up after {MAX_ATTEMPTS} attempts");
+    let _ = app.emit("gateway-status", "failed");
+    let _ = app.emit("gateway-closed", "gateway gave up reconnecting");
+}
+
+/// Reads events from one shard until the stream fails or ends.
+async fn pump_events(
+    app: &AppHandle,
+    shard: &mut Shard,
+    dms: &SharedDms,
+    users: &SharedUsers,
+) {
     while let Some(item) = shard.next().await {
         let message = match item {
             Ok(message) => message,
             Err(err) => {
                 if matches!(err.kind(), ReceiveMessageErrorType::Reconnect) {
-                    // The shard gave up reconnecting; this is fatal.
-                    let _ = app.emit("gateway-closed", err.to_string());
+                    // The shard gave up; the outer loop will make a fresh one.
+                    eprintln!("[disfast] gateway: shard failed: {err}");
                     break;
                 }
                 // Recoverable (e.g. decompression): shard keeps going.
+                eprintln!("[disfast] gateway: recoverable error: {err}");
                 continue;
             }
         };
@@ -159,6 +205,7 @@ async fn run_gateway(app: AppHandle, token: String, dms: SharedDms, users: Share
                     }
                 }
                 let _ = app.emit("gateway-ready", &data);
+                let _ = app.emit("gateway-status", "ready");
             }
             "MESSAGE_CREATE" => {
                 // Grow the user cache from authors we see.
@@ -198,7 +245,7 @@ async fn run_gateway(app: AppHandle, token: String, dms: SharedDms, users: Share
         }
     }
 
-    let _ = app.emit("gateway-closed", "gateway stream ended");
+    eprintln!("[disfast] gateway: stream ended");
 }
 
 #[tauri::command]
@@ -330,18 +377,29 @@ async fn send_message(
     if content.is_empty() {
         return Err("empty message".to_string());
     }
-    let res = http
-        .post(format!("{API_BASE}/channels/{channel_id}/messages"))
-        .json(&serde_json::json!({ "content": content }))
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    let status = res.status();
-    if !status.is_success() {
-        let body = res.text().await.unwrap_or_default();
-        return Err(format!("send failed ({status}): {body}"));
+    let url = format!("{API_BASE}/channels/{channel_id}/messages");
+    for attempt in 0..3 {
+        let res = http
+            .post(&url)
+            .json(&serde_json::json!({ "content": content }))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        let status = res.status();
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS && attempt < 2 {
+            let body = res.json().await.unwrap_or_default();
+            let wait = retry_after(&body);
+            eprintln!("[disfast] rate limited sending message, retrying in {wait:.1}s");
+            tokio::time::sleep(std::time::Duration::from_secs_f64(wait)).await;
+            continue;
+        }
+        if !status.is_success() {
+            let body = res.text().await.unwrap_or_default();
+            return Err(format!("send failed ({status}): {body}"));
+        }
+        return res.json().await.map_err(|e| e.to_string());
     }
-    res.json().await.map_err(|e| e.to_string())
+    unreachable!()
 }
 
 /// Dev convenience: read a token from `secret.env` in the project root

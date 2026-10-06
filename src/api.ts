@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   Channel,
+  GatewayStatus,
   Guild,
   Message,
   MessageDeletePayload,
@@ -44,6 +45,8 @@ export const events = {
     listen<MessageUpdatePayload>("message-update", (e) => cb(e.payload)),
   onGatewayReady: (cb: () => void): Promise<UnlistenFn> =>
     listen("gateway-ready", () => cb()),
+  onGatewayStatus: (cb: (status: GatewayStatus) => void): Promise<UnlistenFn> =>
+    listen<GatewayStatus>("gateway-status", (e) => cb(e.payload)),
   onGatewayClosed: (cb: (reason: string) => void): Promise<UnlistenFn> =>
     listen<string>("gateway-closed", (e) => cb(e.payload)),
   onDmCreate: (cb: (ch: Channel) => void): Promise<UnlistenFn> =>
