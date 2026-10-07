@@ -3,6 +3,15 @@ export interface User {
   username: string;
   global_name: string | null;
   avatar: string | null;
+  discriminator?: string;
+  bot?: boolean;
+  system?: boolean;
+  banner?: string | null;
+  accent_color?: number | null;
+  bio?: string;
+  pronouns?: string;
+  premium_type?: number;
+  public_flags?: number;
   /** Presence status, when the gateway reports one. */
   status?: PresenceStatus;
   custom_status?: { text: string | null; emoji_name: string | null } | null;
