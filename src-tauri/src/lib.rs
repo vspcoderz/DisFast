@@ -19,11 +19,17 @@ struct DiscordSession {
     /// from message authors. Used to give DM channels displayable names:
     /// modern READY payloads ship `recipient_ids` without user objects.
     users: SharedUsers,
+    /// Our own user ID (needed for permission resolution).
+    user_id: String,
 }
 
 type SharedSession = Arc<Mutex<Option<DiscordSession>>>;
 type SharedDms = Arc<Mutex<Vec<serde_json::Value>>>;
 type SharedUsers = Arc<Mutex<HashMap<String, serde_json::Value>>>;
+/// Gateway session id from READY — required in component interaction
+/// payloads (the `session_id` field) so Discord knows which connection
+/// initiated the click.
+type SharedSessionId = Arc<Mutex<Option<String>>>;
 
 /// Inject a `recipients` array into a DM channel that only carries
 /// `recipient_ids` (the modern READY format), resolving names from the
@@ -113,14 +119,20 @@ const GATEWAY_URL: &str = "wss://gateway.discord.gg/?v=9&encoding=json";
 /// user accounts) and speak the gateway protocol directly — the frontend
 /// consumes JSON anyway, and user accounts receive fields (like
 /// `READY.private_channels`) that typed libraries discard.
-async fn run_gateway(app: AppHandle, token: String, dms: SharedDms, users: SharedUsers) {
+async fn run_gateway(
+    app: AppHandle,
+    token: String,
+    dms: SharedDms,
+    users: SharedUsers,
+    session_id: SharedSessionId,
+) {
     const MAX_ATTEMPTS: u32 = 5;
 
     for attempt in 1..=MAX_ATTEMPTS {
         let _ = app.emit("gateway-status", "connecting");
         eprintln!("[disfast] gateway: connecting (attempt {attempt}/{MAX_ATTEMPTS})");
 
-        match connect_and_pump(&app, &token, &dms, &users).await {
+        match connect_and_pump(&app, &token, &dms, &users, &session_id).await {
             PumpResult::Ready => {
                 eprintln!("[disfast] gateway: connection closed after READY");
             }
@@ -155,6 +167,7 @@ async fn connect_and_pump(
     token: &str,
     dms: &SharedDms,
     users: &SharedUsers,
+    session_id: &SharedSessionId,
 ) -> PumpResult {
     use tokio_tungstenite::connect_async;
 
@@ -259,6 +272,11 @@ async fn connect_and_pump(
                 match event_type {
                     "READY" => {
                         got_ready = true;
+                        // Capture the session id for component interactions.
+                        *session_id.lock().await = data
+                            .get("session_id")
+                            .and_then(|s| s.as_str())
+                            .map(String::from);
                         if let Some(list) = data.get("users").and_then(|u| u.as_array()) {
                             let mut cache = users.lock().await;
                             for user in list {
@@ -355,6 +373,7 @@ async fn connect_and_pump(
 async fn login(
     app: AppHandle,
     state: State<'_, SharedSession>,
+    session_id: State<'_, SharedSessionId>,
     token: String,
 ) -> Result<serde_json::Value, String> {
     let token = token.trim().to_string();
@@ -374,13 +393,19 @@ async fn login(
         http: client,
         dms: Arc::clone(&dms),
         users: Arc::clone(&users),
+        user_id: user
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string(),
     });
     drop(guard);
 
     if !already_connected {
         let app2 = app.clone();
+        let sid = Arc::clone(&session_id.inner());
         tokio::spawn(async move {
-            run_gateway(app2, token, dms, users).await;
+            run_gateway(app2, token, dms, users, sid).await;
         });
     }
 
@@ -437,13 +462,170 @@ async fn get_dms(state: State<'_, SharedSession>) -> Result<serde_json::Value, S
     Ok(serde_json::Value::Array(enriched))
 }
 
+/// ADMINISTRATOR (1<<3) and VIEW_CHANNEL (1<<10) — the two permission
+/// bits the hidden-channel filter cares about.
+const ADMINISTRATOR: u64 = 1 << 3;
+const VIEW_CHANNEL: u64 = 1 << 10;
+const SEND_MESSAGES: u64 = 1 << 11;
+
+/// Discord sends permission bitfields as strings (they exceed f64
+/// precision). Accept strings and numbers alike.
+fn parse_bits(v: Option<&serde_json::Value>) -> u64 {
+    match v {
+        Some(serde_json::Value::String(s)) => s.parse().unwrap_or(0),
+        Some(serde_json::Value::Number(n)) => n.as_u64().unwrap_or(0),
+        _ => 0,
+    }
+}
+
+fn apply_overwrite(perms: u64, allow: u64, deny: u64) -> u64 {
+    (perms & !deny) | allow
+}
+
+/// Effective permission bits for the current user on `channel`, following
+/// Discord's overwrite model: base role permissions, then category
+/// overwrites (root first), each applying @everyone → role (OR'd) →
+/// member, in that order. `base` must already OR @everyone with the
+/// member's roles.
+fn effective_perms(
+    channel: &serde_json::Value,
+    by_id: &HashMap<&str, &serde_json::Value>,
+    base: u64,
+    member_roles: &[String],
+    member_id: &str,
+    guild_id: &str,
+) -> u64 {
+    if base & ADMINISTRATOR != 0 {
+        return u64::MAX;
+    }
+
+    // Overwrite chain: ancestor categories first, then the channel itself.
+    let mut chain = vec![channel];
+    let mut cur = channel;
+    while let Some(pid) = cur.get("parent_id").and_then(|p| p.as_str()) {
+        let Some(parent) = by_id.get(pid) else { break; };
+        chain.push(parent);
+        cur = parent;
+    }
+    chain.reverse();
+
+    let mut perms = base;
+    for node in chain {
+        let Some(ows) = node.get("permission_overwrites").and_then(|o| o.as_array()) else {
+            continue;
+        };
+        // @everyone applies first, then the member's role overwrites
+        // combined, then the member-specific overwrite.
+        let mut role_allow = 0u64;
+        let mut role_deny = 0u64;
+        let mut member_allow = 0u64;
+        let mut member_deny = 0u64;
+        for ow in ows {
+            let id = ow.get("id").and_then(|i| i.as_str()).unwrap_or("");
+            let allow = parse_bits(ow.get("allow"));
+            let deny = parse_bits(ow.get("deny"));
+            let is_member = ow.get("type").and_then(|t| t.as_str()) == Some("member");
+            if is_member {
+                if id == member_id {
+                    member_allow = allow;
+                    member_deny = deny;
+                }
+            } else if id == guild_id {
+                // @everyone overwrite — id equals the guild id.
+                perms = apply_overwrite(perms, allow, deny);
+            } else if member_roles.iter().any(|r| r == id) {
+                role_allow |= allow;
+                role_deny |= deny;
+            }
+        }
+        perms = apply_overwrite(perms, role_allow, role_deny);
+        perms = apply_overwrite(perms, member_allow, member_deny);
+    }
+
+    perms
+}
+
 #[tauri::command]
 async fn get_channels(
     state: State<'_, SharedSession>,
     guild_id: String,
 ) -> Result<serde_json::Value, String> {
-    let http = http(&state).await?;
-    get_json(&http, &format!("/guilds/{guild_id}/channels")).await
+    let (http, member_id) = {
+        let guard = state.inner().lock().await;
+        let session = guard.as_ref().ok_or("not logged in")?;
+        (session.http.clone(), session.user_id.clone())
+    };
+
+    let channels = get_json(&http, &format!("/guilds/{guild_id}/channels")).await?;
+    // User accounts receive *every* channel over REST, including ones
+    // without VIEW_CHANNEL — the official client hides those, so we
+    // compute the permission here and filter.
+    let list = match channels {
+        serde_json::Value::Array(list) => list,
+        other => return Ok(other),
+    };
+
+    let member = get_json(&http, &format!("/guilds/{guild_id}/members/{member_id}")).await;
+    let guild = get_json(&http, &format!("/guilds/{guild_id}")).await;
+    // Fail closed: without permission data we cannot know what is hidden,
+    // so show nothing rather than leaking private channels.
+    let (Ok(member), Ok(guild)) = (member, guild) else {
+        eprintln!("[disfast] get_channels {guild_id}: permission lookups failed, hiding all channels");
+        return Ok(serde_json::Value::Array(vec![]));
+    };
+
+    if guild.get("owner_id").and_then(|v| v.as_str()) == Some(member_id.as_str()) {
+        return Ok(serde_json::Value::Array(list));
+    }
+    let member_roles: Vec<String> = member
+        .get("roles")
+        .and_then(|r| r.as_array())
+        .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        .unwrap_or_default();
+
+    // Base permissions: @everyone role (id == guild id) OR'd with the
+    // member's roles, straight from the guild object's role list.
+    let mut base = 0u64;
+    if let Some(roles) = guild.get("roles").and_then(|r| r.as_array()) {
+        for role in roles {
+            let id = role.get("id").and_then(|i| i.as_str()).unwrap_or("");
+            if id == guild_id || member_roles.iter().any(|r| r == id) {
+                base |= parse_bits(role.get("permissions"));
+            }
+        }
+    }
+
+    let by_id: HashMap<&str, &serde_json::Value> = list
+        .iter()
+        .filter_map(|c| c.get("id").and_then(|i| i.as_str()).map(|id| (id, c)))
+        .collect();
+
+    let mut visible: Vec<serde_json::Value> = Vec::with_capacity(list.len());
+    let mut hidden = 0usize;
+    for channel in &list {
+        let perms = effective_perms(channel, &by_id, base, &member_roles, &member_id, &guild_id);
+        if perms & VIEW_CHANNEL == 0 {
+            hidden += 1;
+            continue;
+        }
+        // Annotate send rights so the client can show the lock icon without
+        // re-deriving the whole overwrite chain.
+        let mut channel = channel.clone();
+        if let Some(obj) = channel.as_object_mut() {
+            obj.insert(
+                "can_send".to_string(),
+                serde_json::Value::Bool(perms & SEND_MESSAGES != 0),
+            );
+        }
+        visible.push(channel);
+    }
+    if hidden > 0 {
+        eprintln!(
+            "[disfast] get_channels {guild_id}: hiding {hidden} of {} channels without VIEW_CHANNEL",
+            list.len()
+        );
+    }
+    Ok(serde_json::Value::Array(visible))
 }
 
 #[tauri::command]
@@ -546,6 +728,86 @@ fn urlencoding(emoji: &str) -> String {
     out
 }
 
+/// Client for unauthenticated auth endpoints (no Authorization header).
+fn build_bare_http() -> Result<reqwest::Client, String> {
+    let mut headers = HeaderMap::new();
+    headers.insert(USER_AGENT, HeaderValue::from_static("Discord/1.0 (https://discord.com)"));
+    reqwest::Client::builder()
+        .default_headers(headers)
+        .build()
+        .map_err(|e| e.to_string())
+}
+
+/// POST to an /auth/* endpoint and classify the outcome.
+async fn auth_request(path: &str, body: serde_json::Value) -> Result<serde_json::Value, String> {
+    let client = build_bare_http()?;
+    let res = client
+        .post(format!("{API_BASE}{path}"))
+        .header("Origin", "https://discord.com")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let status = res.status();
+    let text = res.text().await.unwrap_or_default();
+    let json: serde_json::Value = serde_json::from_str(&text).unwrap_or(serde_json::Value::Null);
+
+    if !status.is_success() {
+        // Discord signals "solve this captcha" via a captcha key on 400s.
+        if json.get("captcha").is_some() || json.get("captcha_sitekey").is_some() {
+            return Ok(classify_auth(json));
+        }
+        let message = json
+            .get("message")
+            .and_then(|m| m.as_str())
+            .unwrap_or("login failed")
+            .to_string();
+        return Err(message);
+    }
+    Ok(classify_auth(json))
+}
+
+/// Tag an auth response with a status the UI can branch on:
+/// success | mfa_required | captcha_required | failed
+fn classify_auth(mut json: serde_json::Value) -> serde_json::Value {
+    let status = if json.get("token").and_then(|t| t.as_str()).is_some() {
+        "success"
+    } else if json.get("captcha_sitekey").is_some() || json.get("captcha").is_some() {
+        "captcha_required"
+    } else if json.get("ticket").is_some() {
+        "mfa_required"
+    } else {
+        "failed"
+    };
+    if let Some(obj) = json.as_object_mut() {
+        obj.insert("status".to_string(), serde_json::Value::String(status.into()));
+    }
+    json
+}
+
+#[tauri::command]
+async fn auth_login(login: String, password: String) -> Result<serde_json::Value, String> {
+    auth_request(
+        "/auth/login",
+        serde_json::json!({
+            "login": login,
+            "password": password,
+            "captcha_key": serde_json::Value::Null,
+            "gift_code_sku_id": serde_json::Value::Null,
+        }),
+    )
+    .await
+}
+
+#[tauri::command]
+async fn auth_mfa_totp(ticket: String, code: String) -> Result<serde_json::Value, String> {
+    auth_request(
+        "/auth/login/mfa/totp",
+        serde_json::json!({ "ticket": ticket, "code": code }),
+    )
+    .await
+}
+
 #[tauri::command]
 async fn get_members(
     state: State<'_, SharedSession>,
@@ -631,7 +893,10 @@ fn get_dev_token() -> Option<String> {
 pub fn run() {
     tauri::Builder::default()
         .manage(Arc::new(Mutex::new(None)) as SharedSession)
+        .manage(Arc::new(Mutex::new(None)) as SharedSessionId)
         .invoke_handler(tauri::generate_handler![
+            auth_login,
+            auth_mfa_totp,
             login,
             get_guilds,
             get_dms,
@@ -648,4 +913,187 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running DisFast");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const GUILD: &str = "guild1";
+    const USER: &str = "user1";
+    const ROLE_A: &str = "roleA";
+
+    fn channel(id: &str, parent: Option<&str>, ows: serde_json::Value) -> serde_json::Value {
+        serde_json::json!({
+            "id": id,
+            "type": 0,
+            "name": id,
+            "parent_id": parent,
+            "permission_overwrites": ows,
+        })
+    }
+
+    fn viewable(
+        ch: &serde_json::Value,
+        by_id: &HashMap<&str, &serde_json::Value>,
+        base: u64,
+        member_roles: &[&str],
+    ) -> bool {
+        let roles: Vec<String> = member_roles.iter().map(|s| s.to_string()).collect();
+        channel_viewable(ch, by_id, base, &roles, USER, GUILD)
+    }
+
+    #[test]
+    fn everyone_view_channel_shows_channel() {
+        let ch = channel("c1", None, serde_json::json!([]));
+        let by_id = HashMap::from([("c1", &ch)]);
+        assert!(viewable(&ch, &by_id, VIEW_CHANNEL, &[]));
+    }
+
+    #[test]
+    fn missing_view_channel_hides_channel() {
+        let ch = channel("c1", None, serde_json::json!([]));
+        let by_id = HashMap::from([("c1", &ch)]);
+        assert!(!viewable(&ch, &by_id, 0, &[]));
+    }
+
+    #[test]
+    fn everyone_deny_overwrite_hides_channel() {
+        let ch = channel(
+            "c1",
+            None,
+            serde_json::json!([{
+                "id": GUILD,
+                "type": "role",
+                "allow": "0",
+                "deny": VIEW_CHANNEL.to_string(),
+            }]),
+        );
+        let by_id = HashMap::from([("c1", &ch)]);
+        assert!(!viewable(&ch, &by_id, VIEW_CHANNEL, &[]));
+    }
+
+    #[test]
+    fn role_allow_overwrite_overrides_everyone_deny() {
+        let ch = channel(
+            "c1",
+            None,
+            serde_json::json!([
+                {
+                    "id": GUILD,
+                    "type": "role",
+                    "allow": "0",
+                    "deny": VIEW_CHANNEL.to_string(),
+                },
+                {
+                    "id": ROLE_A,
+                    "type": "role",
+                    "allow": VIEW_CHANNEL.to_string(),
+                    "deny": "0",
+                },
+            ]),
+        );
+        let by_id = HashMap::from([("c1", &ch)]);
+        assert!(viewable(&ch, &by_id, VIEW_CHANNEL, &[ROLE_A]));
+        // Without the role, the @everyone deny still applies.
+        assert!(!viewable(&ch, &by_id, VIEW_CHANNEL, &[]));
+    }
+
+    #[test]
+    fn member_deny_overwrite_hides_channel_despite_role_allow() {
+        let ch = channel(
+            "c1",
+            None,
+            serde_json::json!([
+                {
+                    "id": ROLE_A,
+                    "type": "role",
+                    "allow": VIEW_CHANNEL.to_string(),
+                    "deny": "0",
+                },
+                {
+                    "id": USER,
+                    "type": "member",
+                    "allow": "0",
+                    "deny": VIEW_CHANNEL.to_string(),
+                },
+            ]),
+        );
+        let by_id = HashMap::from([("c1", &ch)]);
+        assert!(!viewable(&ch, &by_id, VIEW_CHANNEL, &[ROLE_A]));
+    }
+
+    #[test]
+    fn category_deny_applies_to_child_channel() {
+        let cat = channel(
+            "cat1",
+            None,
+            serde_json::json!([{
+                "id": GUILD,
+                "type": "role",
+                "allow": "0",
+                "deny": VIEW_CHANNEL.to_string(),
+            }]),
+        );
+        let child = channel("c1", Some("cat1"), serde_json::json!([]));
+        let by_id = HashMap::from([("cat1", &cat), ("c1", &child)]);
+        assert!(!viewable(&child, &by_id, VIEW_CHANNEL, &[]));
+    }
+
+    #[test]
+    fn child_overwrite_overrides_category_deny() {
+        let cat = channel(
+            "cat1",
+            None,
+            serde_json::json!([{
+                "id": GUILD,
+                "type": "role",
+                "allow": "0",
+                "deny": VIEW_CHANNEL.to_string(),
+            }]),
+        );
+        // Child re-grants VIEW_CHANNEL via its own @everyone overwrite —
+        // channel overwrites apply after category overwrites.
+        let child = channel(
+            "c1",
+            Some("cat1"),
+            serde_json::json!([{
+                "id": GUILD,
+                "type": "role",
+                "allow": VIEW_CHANNEL.to_string(),
+                "deny": "0",
+            }]),
+        );
+        let by_id = HashMap::from([("cat1", &cat), ("c1", &child)]);
+        assert!(viewable(&child, &by_id, VIEW_CHANNEL, &[]));
+    }
+
+    #[test]
+    fn administrator_sees_everything() {
+        let ch = channel(
+            "c1",
+            None,
+            serde_json::json!([{
+                "id": GUILD,
+                "type": "role",
+                "allow": "0",
+                "deny": VIEW_CHANNEL.to_string(),
+            }]),
+        );
+        let by_id = HashMap::from([("c1", &ch)]);
+        assert!(viewable(
+            &ch,
+            &by_id,
+            ADMINISTRATOR | VIEW_CHANNEL,
+            &[],
+        ));
+    }
+
+    #[test]
+    fn parse_bits_handles_strings_and_numbers() {
+        assert_eq!(parse_bits(Some(&serde_json::json!("1024"))), 1024);
+        assert_eq!(parse_bits(Some(&serde_json::json!(2048))), 2048);
+        assert_eq!(parse_bits(Some(&serde_json::json!("bogus"))), 0);
+        assert_eq!(parse_bits(None), 0);
+    }
 }

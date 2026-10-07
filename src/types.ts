@@ -23,7 +23,10 @@ export interface Channel {
   type: number;
   name: string | null;
   position?: number;
+  parent_id?: string | null;
   recipients?: User[];
+  /** Computed server-side: false means read-only (show lock). */
+  can_send?: boolean;
   /** Snowflake of the most recent message — used to sort DMs by activity. */
   last_message_id?: string | null;
 }
@@ -117,6 +120,16 @@ export type GuildSelection = "dm" | string;
 
 /** Gateway connection state, shown as a status dot in the user bar. */
 export type GatewayStatus = "connecting" | "reconnecting" | "ready" | "failed";
+
+/** Result of an /auth/* call. */
+export interface AuthResult {
+  /** success | mfa_required | captcha_required | failed */
+  status: "success" | "mfa_required" | "captcha_required" | "failed";
+  token?: string;
+  ticket?: string;
+  message?: string;
+  captcha_sitekey?: string;
+}
 
 export const IS_COMPONENTS_V2 = 1 << 15;
 

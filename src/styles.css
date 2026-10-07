@@ -75,6 +75,12 @@ body,
   cursor: default;
 }
 
+.login-card button.login-secondary {
+  background: var(--bg-3);
+  color: var(--text);
+  font-weight: 500;
+}
+
 .login-card button:hover:not(:disabled) {
   filter: brightness(1.1);
 }

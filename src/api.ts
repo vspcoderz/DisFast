@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
+  AuthResult,
   Channel,
   GatewayStatus,
   Guild,
@@ -40,6 +41,10 @@ export const api = {
     invoke<Array<{ id: string; name: string; color: number | null; position: number }>>("get_roles", { guildId }),
   /** Debug builds only; null in release. */
   getDevToken: () => invoke<string | null>("get_dev_token"),
+  authLogin: (login: string, password: string) =>
+    invoke<AuthResult>("auth_login", { login, password }),
+  authMfaTotp: (ticket: string, code: string) =>
+    invoke<AuthResult>("auth_mfa_totp", { ticket, code }),
 };
 
 export const events = {

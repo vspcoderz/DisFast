@@ -28,16 +28,13 @@ function UnreadBadge({ count }: { count?: number }) {
   return <span className="unread-badge">{count > 99 ? "99+" : count}</span>;
 }
 
-/** Check if a channel is locked (no SEND_MESSAGES for @everyone). */
+/**
+ * A channel is read-only when the server says we lack SEND_MESSAGES.
+ * The Rust side resolves the full overwrite chain (roles + categories),
+ * so we just read its verdict rather than re-deriving permissions here.
+ */
 function isLocked(ch: Channel): boolean {
-  const overrides = (ch as Channel & { permission_overwrites?: { id: string; deny: string }[] })
-    .permission_overwrites;
-  if (!overrides) return false;
-  // @everyone override has the same ID as the guild
-  const everyone = overrides.find((o) => o.id === (ch as Channel & { guild_id?: string }).guild_id);
-  if (!everyone) return false;
-  // SEND_MESSAGES = 1 << 11 = 2048
-  return (BigInt(everyone.deny) & BigInt(2048)) !== BigInt(0);
+  return ch.can_send === false;
 }
 
 export function ChannelPane({
@@ -60,7 +57,7 @@ export function ChannelPane({
   const categories = new Map<string, Channel[]>();
   const uncategorized: Channel[] = [];
   for (const ch of textChannels) {
-    const parentId = (ch as Channel & { parent_id?: string | null }).parent_id;
+    const parentId = ch.parent_id;
     if (parentId) {
       const list = categories.get(parentId) ?? [];
       list.push(ch);
