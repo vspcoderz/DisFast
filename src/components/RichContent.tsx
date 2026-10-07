@@ -10,15 +10,42 @@ function Md({ text }: { text: string }) {
   return <span dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }} />;
 }
 
+/**
+ * Discord's media CDN serves downscaled variants. Requesting ~520px
+ * instead of a 4K original avoids downloading and decoding a huge frame
+ * for something displayed at most ~320px tall.
+ */
+function resize(url: string, width = 520): string {
+  if (!url.includes("discordapp.net")) return url;
+  return `${url}${url.includes("?") ? "&" : "?"}width=${width}&format=webp&quality=90`;
+}
+
 export function EmbedView({ embed }: { embed: Embed }) {
-  // Non-rich embeds (images/gifs/videos) — just show the media or a link.
-  if (embed.type === "image" || embed.type === "gifv") {
-    const url = embed.image?.url ?? embed.thumbnail?.url ?? embed.url;
+  // Video / gifv embeds are frequently 4K. Rendering one as <img> forces
+  // a full decode on mount, which stalls the UI — so use <video> with
+  // preload="none" and let the poster carry the still frame.
+  if (embed.type === "video" || embed.type === "gifv") {
+    const src = embed.video?.url ?? embed.image?.url ?? embed.url;
+    if (!src) return null;
+    return (
+      <video
+        className="embed-video"
+        src={src}
+        poster={embed.thumbnail?.url ? resize(embed.thumbnail.url) : undefined}
+        controls
+        preload="none"
+        playsInline
+      />
+    );
+  }
+
+  if (embed.type === "image") {
     const dim = embed.image ?? embed.thumbnail;
+    const url = dim?.url ?? embed.url;
     return url ? (
       <img
         className="attachment-img"
-        src={url}
+        src={resize(url)}
         alt=""
         loading="lazy"
         decoding="async"
@@ -30,13 +57,6 @@ export function EmbedView({ embed }: { embed: Embed }) {
             : undefined
         }
       />
-    ) : null;
-  }
-  if (embed.type === "video") {
-    return embed.url ? (
-      <a href={embed.url} target="_blank" rel="noreferrer">
-        {embed.url}
-      </a>
     ) : null;
   }
 
@@ -82,7 +102,7 @@ export function EmbedView({ embed }: { embed: Embed }) {
       {embed.image && (
         <img
           className="embed-image"
-          src={embed.image.url}
+          src={resize(embed.image.url)}
           alt=""
           loading="lazy"
           decoding="async"

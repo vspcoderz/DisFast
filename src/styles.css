@@ -935,6 +935,14 @@ body,
   overflow-wrap: break-word;
 }
 
+.embed-video {
+  max-width: 100%;
+  max-height: 320px;
+  border-radius: 4px;
+  background: #000;
+  display: block;
+}
+
 .embed-image {
   max-width: 100%;
   /* Cap the height like Discord does — a tall embed image should scroll

@@ -261,6 +261,7 @@ export function ChatPane({
   sendTyping: sendTypingProp,
 }: Props) {
   const [messages, setMessages] = useState<Message[]>([]);
+  const [phase, setPhase] = useState<"loading" | "ready">("loading");
   const [hasMore, setHasMore] = useState(true);
   const [draft, setDraft] = useState("");
   const [lightbox, setLightbox] = useState<string | null>(null);
@@ -290,6 +291,7 @@ export function ChatPane({
         if (!alive) return;
         setMessages(msgs.reverse());
         setHasMore(msgs.length === 50);
+        setPhase("ready");
         requestAnimationFrame(() => {
           const list = listRef.current;
           if (list) list.scrollTop = list.scrollHeight;
@@ -611,7 +613,7 @@ function readAsBase64(file: File): Promise<string> {
               document.querySelector<HTMLInputElement>(".composer input")?.focus();
             }}
             onCopyLink={copyLink}
-            onComponentInteract={(i) => interact(row.msg, i)}
+            onComponentInteract={(i) => interact(r.msg, i)}
           />
         ))}
         {typingUsers.size > 0 && (

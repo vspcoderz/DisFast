@@ -62,6 +62,8 @@ export interface Embed {
   footer?: { text: string; icon_url?: string };
   image?: { url: string; width?: number; height?: number };
   thumbnail?: { url: string; width?: number; height?: number };
+  /** Present on video/gifv embeds (often 4K — never preload these). */
+  video?: { url: string; width?: number; height?: number };
   author?: { name: string; url?: string; icon_url?: string };
   fields?: { name: string; value: string; inline?: boolean }[];
 }
