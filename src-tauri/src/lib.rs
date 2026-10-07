@@ -1093,6 +1093,60 @@ async fn interact_component(
         .map_err(|_| "gateway send failed".to_string())
 }
 
+/// Update our own presence and/or custom status.
+///
+/// `PATCH /users/@me` accepts `status` ("online" | "idle" | "dnd" |
+/// "invisible") and `custom_status: { text, emoji_name? }`.
+#[tauri::command]
+async fn set_status(
+    state: State<'_, SharedSession>,
+    status: Option<String>,
+    custom_text: Option<String>,
+    emoji_name: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let http = http(&state).await?;
+    let mut payload = serde_json::Map::new();
+    if let Some(status) = status {
+        let allowed = ["online", "idle", "dnd", "invisible"];
+        if !allowed.contains(&status.as_str()) {
+            return Err(format!("invalid status: {status}"));
+        }
+        payload.insert("status".to_string(), serde_json::Value::String(status));
+    }
+    // Discord rejects an empty object, and clearing needs an explicit null.
+    let text = custom_text.unwrap_or_default();
+    if !text.is_empty() || emoji_name.is_some() {
+        let mut custom = serde_json::Map::new();
+        if text.is_empty() {
+            custom.insert("text".to_string(), serde_json::Value::String(String::new()));
+        } else {
+            custom.insert("text".to_string(), serde_json::Value::String(text));
+        }
+        if let Some(emoji) = emoji_name {
+            if !emoji.is_empty() {
+                custom.insert("emoji_name".to_string(), serde_json::Value::String(emoji));
+            }
+        }
+        payload.insert("custom_status".to_string(), serde_json::Value::Object(custom));
+    }
+    if payload.is_empty() {
+        return Err("nothing to update".to_string());
+    }
+
+    let res = http
+        .patch(format!("{API_BASE}/users/@me"))
+        .json(&serde_json::Value::Object(payload))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let status = res.status();
+    if !status.is_success() {
+        let body = res.text().await.unwrap_or_default();
+        return Err(format!("status update failed ({status}): {body}"));
+    }
+    res.json().await.map_err(|e| e.to_string())
+}
+
 /// Edit an existing message. Discord allows editing your own messages
 /// within 15 minutes; beyond that (or for others' messages) you need
 /// MANAGE_MESSAGES, and the API rejects it with 403.
@@ -1269,6 +1323,7 @@ pub fn run() {
             get_members,
             get_roles,
             get_user_profile,
+            set_status,
             interact_component,
             create_invite,
             get_dev_token,

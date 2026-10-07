@@ -1,4 +1,4 @@
-import { Lock } from "lucide-react";
+import { Lock, Settings } from "lucide-react";
 import type { Channel, GatewayStatus, Guild, GuildSelection, User } from "../types";
 import { avatarUrl, displayName, dmChannelName } from "../utils";
 import { Avatar } from "./Avatar";
@@ -19,8 +19,11 @@ interface Props {
   activeChannelId: string | null;
   unreadChannels: Record<string, number>;
   gatewayStatus: GatewayStatus;
+  /** Presence status from the settings store. */
+  statusText: string;
   user: User;
   onSelect: (id: string, name: string, dm?: DmTarget) => void;
+  onOpenSettings: () => void;
 }
 
 function UnreadBadge({ count }: { count?: number }) {
@@ -45,8 +48,10 @@ export function ChannelPane({
   activeChannelId,
   unreadChannels,
   gatewayStatus,
+  statusText,
   user,
   onSelect,
+  onOpenSettings,
 }: Props) {
   const isDm = selection === "dm";
   const textChannels = channels
@@ -135,9 +140,27 @@ export function ChannelPane({
         )}
       </div>
       <footer className="user-bar">
-        <span className={`status-dot ${gatewayStatus}`} title={`Gateway: ${gatewayStatus}`} />
-        <Avatar user={user} size={30} />
-        <span>{displayName(user)}</span>
+        <div className="user-bar-main">
+          <div className="user-bar-avatar">
+            <Avatar user={user} size={30} />
+            <span
+              className={`status-dot ${gatewayStatus}`}
+              title={`Gateway: ${gatewayStatus}`}
+            />
+          </div>
+          <span className="user-bar-names">
+            <span className="user-bar-name">{displayName(user)}</span>
+            <span className="user-bar-status">{statusText}</span>
+          </span>
+        </div>
+        <button
+          className="user-bar-btn"
+          onClick={onOpenSettings}
+          title="Settings"
+          aria-label="Open settings"
+        >
+          <Settings size={16} />
+        </button>
       </footer>
     </aside>
   );

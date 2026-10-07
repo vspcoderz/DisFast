@@ -9,6 +9,7 @@ import { ChatPane } from "./ChatPane";
 import { GroupDmPanel } from "./GroupDmPanel";
 import { MemberSidebar } from "./MemberSidebar";
 import { ProfilePanel } from "./ProfilePanel";
+import { Settings, type Prefs } from "./Settings";
 
 export interface ActiveChannel {
   id: string;
@@ -38,7 +39,7 @@ function sortDmsByActivity(list: Channel[]): Channel[] {
   });
 }
 
-export function Main({ user }: { user: User }) {
+export function Main({ user, onLoggedOut }: { user: User; onLoggedOut: () => void }) {
   const [guilds, setGuilds] = useState<Guild[]>([]);
   const [dms, setDms] = useState<Channel[]>([]);
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -57,6 +58,13 @@ export function Main({ user }: { user: User }) {
   activeChannelRef.current = activeChannel;
   const [notifyEnabled, setNotifyEnabled] = useState(false);
   const guildOfRef = useRef<(channelId: string) => string | null>(() => () => null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [prefs, setPrefs] = useState<Prefs>({
+    notifications: true,
+    sendTyping: true,
+    messageFont: 15,
+    compactMode: false,
+  });
 
   // Load guild list once.
   useEffect(() => {
@@ -97,6 +105,16 @@ export function Main({ user }: { user: User }) {
     initNotifications(() => {});
     setNotifyEnabled(notificationPermission() === "granted");
   }, []);
+
+  // Apply message-size / spacing preferences to the chat column.
+  useEffect(() => {
+    const root = document.documentElement;
+    root.style.setProperty("--message-font", `${prefs.messageFont}px`);
+    root.style.setProperty(
+      "--message-block-gap",
+      prefs.compactMode ? "6px" : "16px",
+    );
+  }, [prefs.messageFont, prefs.compactMode]);
 
   // Remember which guild each channel belongs to, for notification links.
   useEffect(() => {
@@ -149,7 +167,7 @@ export function Main({ user }: { user: User }) {
     return () => {
       unlisten.then((f) => f());
     };
-  }, [user.id, notifyEnabled]);
+  }, [user.id, notifyEnabled, prefs.notifications]);
 
   const selectGuild = useCallback(async (sel: GuildSelection) => {
     setActiveGuild(sel);
@@ -189,6 +207,12 @@ export function Main({ user }: { user: User }) {
   const showMembers = activeGuild !== "dm" && activeChannel != null;
 
   const guild = guilds.find((g) => g.id === activeGuild) ?? null;
+  // Custom status wins; otherwise show the presence label.
+  const prefsStatusText =
+    user.custom_status?.text?.trim() ||
+    ({ online: "Online", idle: "Idle", dnd: "Do Not Disturb", invisible: "Invisible" }[
+      user.status ?? "online"
+    ] ?? "Online");
 
   return (
     <div
@@ -208,8 +232,10 @@ export function Main({ user }: { user: User }) {
         activeChannelId={activeChannel?.id ?? null}
         unreadChannels={unreadChannels}
         gatewayStatus={gatewayStatus}
+        statusText={prefsStatusText}
         user={user}
         onSelect={selectChannel}
+        onOpenSettings={() => setSettingsOpen(true)}
       />
 
       {/* Header spans the chat + profile columns, so the search bar sits
@@ -269,6 +295,7 @@ export function Main({ user }: { user: User }) {
           channel={activeChannel}
           query={query}
           currentUserId={user.id}
+          sendTyping={prefs.sendTyping}
         />
       ) : (
         <main className="chat-pane" />
@@ -282,6 +309,13 @@ export function Main({ user }: { user: User }) {
           <ProfilePanel userId={recipientId!} />
         ))}
       {error && <div className="error-toast">{error}</div>}
+      <Settings
+        user={user}
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        onPrefsChange={setPrefs}
+        onLoggedOut={onLoggedOut}
+      />
     </div>
   );
 }

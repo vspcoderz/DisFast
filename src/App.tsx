@@ -44,5 +44,13 @@ export default function App() {
   if (!user) {
     return <Login initialError={bootError} onLogin={setUser} />;
   }
-  return <Main user={user} />;
+  return (
+    <Main
+      user={user}
+      onLoggedOut={() => {
+        localStorage.removeItem("disfast.token");
+        setUser(null);
+      }}
+    />
+  );
 }

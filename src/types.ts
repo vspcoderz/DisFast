@@ -3,6 +3,9 @@ export interface User {
   username: string;
   global_name: string | null;
   avatar: string | null;
+  /** Presence status, when the gateway reports one. */
+  status?: PresenceStatus;
+  custom_status?: { text: string | null; emoji_name: string | null } | null;
   /** Avatar decoration (animated overlay), when known */
   avatar_decoration_data?: {
     asset: string;
@@ -150,6 +153,9 @@ export type GuildSelection = "dm" | string;
 
 /** Gateway connection state, shown as a status dot in the user bar. */
 export type GatewayStatus = "connecting" | "reconnecting" | "ready" | "failed";
+
+/** Presence status settable via PATCH /users/@me. */
+export type PresenceStatus = "online" | "idle" | "dnd" | "invisible";
 
 /** Result of an /auth/* call. */
 export interface AuthResult {

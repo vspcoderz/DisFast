@@ -66,6 +66,12 @@ export const api = {
     invoke<void>("remove_pin", { channelId, messageId }),
   getUserProfile: (userId: string) =>
     invoke<UserProfileResponse>("get_user_profile", { userId }),
+  setStatus: (status: PresenceStatus, customText?: string, emojiName?: string) =>
+    invoke<User>("set_status", {
+      status,
+      customText: customText ?? null,
+      emojiName: emojiName ?? null,
+    }),
   createInvite: (channelId: string) =>
     invoke<{ code: string }>("create_invite", { channelId }),
   addReaction: (channelId: string, messageId: string, emoji: string) =>

@@ -17,6 +17,10 @@
 
   --anim-fast: 0.12s ease-out;
   --anim-normal: 0.2s ease-out;
+
+  /* Driven from the settings modal */
+  --message-font: 15px;
+  --message-block-gap: 16px;
 }
 
 * {
@@ -298,19 +302,214 @@ body,
 }
 
 .user-bar {
-  padding: 10px;
-  background: rgba(0, 0, 0, 0.25);
+  padding: 8px;
+  background: #232428;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.user-bar-main {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
-.user-bar img {
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
+.user-bar-avatar {
+  position: relative;
+  flex-shrink: 0;
 }
+
+.user-bar-avatar .status-dot {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  border: 3px solid #232428;
+  width: 12px;
+  height: 12px;
+}
+
+.user-bar-names {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.2;
+}
+
+.user-bar-name {
+  font-size: 15px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.user-bar-status {
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.user-bar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.user-bar-btn:hover {
+  background: var(--bg-3);
+  color: var(--text);
+}
+
+/* ---------- Settings modal ---------- */
+.modal-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.modal {
+  width: 100%;
+  max-width: 480px;
+  max-height: 90vh;
+  overflow-y: auto;
+  background: var(--bg-2);
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.modal:focus {
+  outline: none;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.modal-header h2 {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.settings-section {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.settings-section:last-child {
+  border-bottom: none;
+}
+
+.settings-section h3 {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--text-2);
+}
+
+.settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 14px;
+}
+
+.settings-field > span {
+  color: var(--text-2);
+}
+
+.settings-field input[type="text"],
+.settings-field select {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-1);
+  color: var(--text);
+  font-size: 14px;
+}
+
+.settings-field input:focus-visible,
+.settings-field select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.settings-field output {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.settings-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.settings-save,
+.settings-danger {
+  align-self: flex-start;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 4px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.settings-save {
+  background: var(--accent);
+  color: white;
+}
+
+.settings-save:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.settings-danger {
+  background: transparent;
+  color: #f23f43;
+  border: 1px solid #f23f43;
+}
+
+.settings-note {
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+/* Avatar sizing is handled inline by the Avatar component. */
 
 .status-dot {
   width: 10px;
@@ -382,9 +581,10 @@ body,
   transition: background-color 0.075s linear;
 }
 
-/* 8px between author groups, 2px between their consecutive messages */
+/* Gap between author groups; the settings modal shrinks this for a
+   denser view. Within a group messages stay 2px apart. */
 .message:not(.grouped) {
-  margin-top: 16px;
+  margin-top: var(--message-block-gap);
 }
 
 .message.grouped {
@@ -453,6 +653,7 @@ body,
 }
 
 .message .content {
+  font-size: var(--message-font);
   overflow-wrap: anywhere;
   line-height: 1.4;
 }

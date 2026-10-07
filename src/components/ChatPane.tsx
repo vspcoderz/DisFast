@@ -1,4 +1,12 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ClipboardEvent,
+} from "react";
 import { Link as LinkIcon, Paperclip, Pencil, Reply, Trash2 } from "lucide-react";
 import { api, events } from "../api";
 import { renderMarkdown } from "../markdown";
@@ -50,15 +58,19 @@ const MessageRow = memo(function MessageRow({
   onDelete: (m: Message) => void;
   onReply: (m: Message) => void;
   onCopyLink: (m: Message) => void;
-  onInteractProp: (m: Message, i: Interaction) => void;
+  onComponentInteract: (i: Interaction) => void;
 }) {
   const isV2 = ((msg.flags ?? 0) & IS_COMPONENTS_V2) !== 0;
   const reply = msg.referenced_message;
   const isMine = msg.author.id === currentUserId;
-  const onInteract = (i: Interaction) => onInteractProp(msg, i);
+  const onInteract = onComponentInteract;
 
   return (
-    <div className={`message${grouped ? " grouped" : ""}`} data-id={msg.id}>
+    <div
+      className={`message${grouped ? " grouped" : ""}`}
+      data-id={msg.id}
+      role="listitem"
+    >
       {grouped ? (
         // Timestamp appears in the left gutter only on hover, in the space
         // the avatar column already reserves.
@@ -226,9 +238,15 @@ interface Props {
   channel: ActiveChannel;
   query: string;
   currentUserId: string;
+  sendTyping?: boolean;
 }
 
-export function ChatPane({ channel, query, currentUserId }: Props) {
+export function ChatPane({
+  channel,
+  query,
+  currentUserId,
+  sendTyping: sendTypingProp,
+}: Props) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [hasMore, setHasMore] = useState(true);
   const [draft, setDraft] = useState("");
@@ -236,6 +254,9 @@ export function ChatPane({ channel, query, currentUserId }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
+  // Typing can be disabled in settings; sync the prop into local state so
+  // the guard in notifyTyping reads it without re-subscribing listeners.
+  const sendTyping = sendTypingProp ?? true;
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [typingUsers, setTypingUsers] = useState<Map<string, number>>(new Map());
   const [toast, setToast] = useState<string | null>(null);
@@ -448,7 +469,7 @@ function readAsBase64(file: File): Promise<string> {
   }
 
   /** Paste images straight into the composer. */
-  function onPaste(e: React.ClipboardEvent) {
+  function onPaste(e: ClipboardEvent) {
     const items = Array.from(e.clipboardData.items);
     const files = items
       .filter((i) => i.kind === "file" && i.type.startsWith("image/"))
@@ -462,6 +483,7 @@ function readAsBase64(file: File): Promise<string> {
 
   /** Discord's typing indicator expires after 10s; send at most every 8. */
   function notifyTyping() {
+    if (!sendTyping) return;
     const now = Date.now();
     if (now - lastTypingSent.current < 8000) return;
     lastTypingSent.current = now;
@@ -576,7 +598,7 @@ function readAsBase64(file: File): Promise<string> {
               document.querySelector<HTMLInputElement>(".composer input")?.focus();
             }}
             onCopyLink={copyLink}
-            onInteractProp={interact}
+            onComponentInteract={(i) => interact(row.msg, i)}
           />
         ))}
         {typingUsers.size > 0 && (
