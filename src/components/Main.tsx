@@ -62,6 +62,14 @@ export function Main({ user, onLoggedOut }: { user: User; onLoggedOut: () => voi
   // Kept in sync after profile edits so the user bar reflects changes.
   const [selfUser, setSelfUser] = useState<User>(user);
   const [showSelfProfile, setShowSelfProfile] = useState(false);
+  // Stable identities: Settings keys its Esc handler off `onClose`, so an
+  // inline arrow here would re-register that listener on every render.
+  const closeSettings = useCallback(() => setSettingsOpen(false), []);
+  const openSettings = useCallback(() => setSettingsOpen(true), []);
+  const openSelfProfile = useCallback(() => {
+    setShowSelfProfile((v) => !v);
+    setShowProfile(false);
+  }, []);
   const [prefs, setPrefs] = useState<Prefs>({
     notifications: true,
     notificationSounds: true,
@@ -245,11 +253,8 @@ export function Main({ user, onLoggedOut }: { user: User; onLoggedOut: () => voi
         statusText={prefsStatusText}
         user={selfUser}
         onSelect={selectChannel}
-        onOpenSettings={() => setSettingsOpen(true)}
-        onOpenProfile={() => {
-          setShowSelfProfile((v) => !v);
-          setShowProfile(false);
-        }}
+        onOpenSettings={openSettings}
+        onOpenProfile={openSelfProfile}
       />
 
       {/* Header spans the chat + profile columns, so the search bar sits
@@ -339,7 +344,7 @@ export function Main({ user, onLoggedOut }: { user: User; onLoggedOut: () => voi
       <Settings
         user={user}
         open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
+        onClose={closeSettings}
         onPrefsChange={setPrefs}
         onLoggedOut={onLoggedOut}
       />

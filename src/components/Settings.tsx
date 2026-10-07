@@ -91,15 +91,18 @@ export function Settings({ user, open, onClose, onPrefsChange, onLoggedOut }: Pr
   }, [prefs.accent, prefs.theme, prefs.reduceMotion]);
 
   // Esc to close + focus the dialog so keyboard users land inside it.
+  // Uses a ref for the handler so re-renders can't leave a stale listener.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   useEffect(() => {
     if (!open) return;
     dialogRef.current?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") onCloseRef.current();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 
