@@ -937,8 +937,13 @@ body,
 
 .embed-image {
   max-width: 100%;
-  height: auto;
+  /* Cap the height like Discord does — a tall embed image should scroll
+     inside the embed rather than dominate the message list */
+  max-height: 320px;
+  object-fit: contain;
+  object-position: left top;
   border-radius: 4px;
+  background: var(--bg-0);
 }
 
 .embed-thumbnail {

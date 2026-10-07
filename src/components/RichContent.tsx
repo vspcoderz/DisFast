@@ -14,7 +14,23 @@ export function EmbedView({ embed }: { embed: Embed }) {
   // Non-rich embeds (images/gifs/videos) — just show the media or a link.
   if (embed.type === "image" || embed.type === "gifv") {
     const url = embed.image?.url ?? embed.thumbnail?.url ?? embed.url;
-    return url ? <img className="attachment-img" src={url} alt="" loading="lazy" /> : null;
+    const dim = embed.image ?? embed.thumbnail;
+    return url ? (
+      <img
+        className="attachment-img"
+        src={url}
+        alt=""
+        loading="lazy"
+        decoding="async"
+        width={dim?.width}
+        height={dim?.height}
+        style={
+          dim?.width && dim?.height
+            ? { aspectRatio: `${dim.width} / ${dim.height}` }
+            : undefined
+        }
+      />
+    ) : null;
   }
   if (embed.type === "video") {
     return embed.url ? (
@@ -63,9 +79,35 @@ export function EmbedView({ embed }: { embed: Embed }) {
           ))}
         </div>
       )}
-      {embed.image && <img className="embed-image" src={embed.image.url} alt="" loading="lazy" />}
+      {embed.image && (
+        <img
+          className="embed-image"
+          src={embed.image.url}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          // Reserve the box up front: without intrinsic dimensions every
+          // image load relayouts the whole message list, which is brutal in
+          // channels that are mostly embeds.
+          width={embed.image.width}
+          height={embed.image.height}
+          style={
+            embed.image.width && embed.image.height
+              ? { aspectRatio: `${embed.image.width} / ${embed.image.height}` }
+              : undefined
+          }
+        />
+      )}
       {embed.thumbnail && !embed.image && (
-        <img className="embed-thumbnail" src={embed.thumbnail.url} alt="" loading="lazy" />
+        <img
+          className="embed-thumbnail"
+          src={embed.thumbnail.url}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          width={embed.thumbnail.width}
+          height={embed.thumbnail.height}
+        />
       )}
       {embed.footer && (
         <div className="embed-footer">

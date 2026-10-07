@@ -24,11 +24,27 @@ export function initSpoilers() {
   });
 }
 
+/**
+ * Cheap pre-test: if the text has nothing that needs the full pipeline
+ * (markdown markers, links, mentions, or emoji), skip the regex passes
+ * and the Twemoji scan entirely. Embed-heavy channels hit this path for
+ * most fields, and the full parser was costing ~8 regexes + a codepoint
+ * classification per field per render.
+ */
+const NEEDS_FULL_PIPELINE =
+  /[*_`~|#<>]|\]\(|https?:\/\/|&lt;[@#&]|[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/u;
+
 export function renderMarkdown(text: string): string {
   const esc = text
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
+
+  // Plain-text fast path: escaping above is sufficient when there's
+  // nothing to interpret.
+  if (!NEEDS_FULL_PIPELINE.test(text)) {
+    return esc.replace(/\n/g, "<br>");
+  }
 
   const html = esc
     // Custom emoji (escaped form: &lt;:name:id&gt;)
