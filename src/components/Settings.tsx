@@ -115,7 +115,7 @@ export function Settings({ user, open, onClose, onPrefsChange, onLoggedOut }: Pr
       setStatus(updated.status ?? status);
       setCustomText(updated.custom_status?.text ?? "");
     } catch (e) {
-      setError(String(e));
+      setError(cleanError(e));
     } finally {
       setSaving(false);
     }
@@ -381,6 +381,18 @@ export function Settings({ user, open, onClose, onPrefsChange, onLoggedOut }: Pr
       </div>
     </div>
   );
+}
+
+/**
+ * Tauri rejections arrive as "Error: <message>". Strip the prefix and
+ * collapse anything that still looks like a raw API payload.
+ */
+export function cleanError(e: unknown): string {
+  const raw = e instanceof Error ? e.message : String(e);
+  return raw
+    .replace(/^Error:\s*/, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 export type { Prefs };

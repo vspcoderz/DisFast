@@ -4,6 +4,7 @@ import { renderMarkdown } from "../markdown";
 import type { User, UserProfileResponse } from "../types";
 import { displayName } from "../utils";
 import { Avatar } from "./Avatar";
+import { cleanError } from "./Settings";
 
 /** Discord snowflake IDs embed a Unix timestamp (ms since Discord epoch). */
 const DISCORD_EPOCH = 1420070400000n;
@@ -78,7 +79,7 @@ function ProfileEditor({
       onSaved(updated);
       onCancel();
     } catch (e) {
-      setError(String(e));
+      setError(cleanError(e));
     } finally {
       setBusy(false);
     }
@@ -96,7 +97,7 @@ function ProfileEditor({
       });
       onSaved(updated);
     } catch (e) {
-      setError(String(e));
+      setError(cleanError(e));
     } finally {
       setBusy(false);
     }

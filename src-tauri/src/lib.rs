@@ -88,6 +88,24 @@ fn build_http(token: &str) -> Result<reqwest::Client, String> {
         .map_err(|e| e.to_string())
 }
 
+/// Discord gates account-mutating endpoints (PATCH /users/@me, avatar
+/// and banner uploads) behind hCaptcha for clients it doesn't recognise.
+/// We surface a clear message instead of leaking their JSON payload;
+/// solving the challenge is intentionally out of scope.
+fn account_mutation_error(status: reqwest::StatusCode, body: &str) -> String {
+    let needs_captcha = body.contains("captcha_key") || body.contains("captcha_sitekey");
+    if needs_captcha || status == reqwest::StatusCode::BAD_REQUEST {
+        return "Discord requires captcha verification to change account details \
+                from a third-party client. Make this change in the official \
+                Discord client."
+            .to_string();
+    }
+    if status == reqwest::StatusCode::FORBIDDEN {
+        return "Discord refused this change for your account.".to_string();
+    }
+    format!("request failed ({status}): {body}")
+}
+
 /// Extract Discord's retry_after (seconds) from a 429 body.
 fn retry_after(body: &serde_json::Value) -> f64 {
     body.get("retry_after")
@@ -1142,7 +1160,7 @@ async fn set_status(
     let status = res.status();
     if !status.is_success() {
         let body = res.text().await.unwrap_or_default();
-        return Err(format!("status update failed ({status}): {body}"));
+        return Err(account_mutation_error(status, &body));
     }
     res.json().await.map_err(|e| e.to_string())
 }
@@ -1209,7 +1227,7 @@ async fn set_profile(
     let status = res.status();
     if !status.is_success() {
         let body = res.text().await.unwrap_or_default();
-        return Err(format!("profile update failed ({status}): {body}"));
+        return Err(account_mutation_error(status, &body));
     }
     res.json().await.map_err(|e| e.to_string())
 }
@@ -1250,7 +1268,7 @@ async fn upload_profile_image(
     let status = res.status();
     if !status.is_success() {
         let body = res.text().await.unwrap_or_default();
-        return Err(format!("image upload failed ({status}): {body}"));
+        return Err(account_mutation_error(status, &body));
     }
     res.json().await.map_err(|e| e.to_string())
 }
