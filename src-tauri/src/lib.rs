@@ -69,6 +69,9 @@ fn build_http(token: &str) -> Result<reqwest::Client, String> {
     headers.insert(USER_AGENT, HeaderValue::from_static("DisFast/0.1"));
     reqwest::Client::builder()
         .default_headers(headers)
+        // Without a timeout a hung Discord connection holds a task forever.
+        .timeout(std::time::Duration::from_secs(30))
+        .pool_max_idle_per_host(4)
         .build()
         .map_err(|e| e.to_string())
 }
@@ -279,6 +282,9 @@ async fn connect_and_pump(
                             .map(String::from);
                         if let Some(list) = data.get("users").and_then(|u| u.as_array()) {
                             let mut cache = users.lock().await;
+                            // Replace, don't merge: users cached from a
+                            // previous session are a pure leak.
+                            cache.clear();
                             for user in list {
                                 if let Some(id) = user.get("id").and_then(|i| i.as_str()) {
                                     cache.insert(id.to_string(), user.clone());
@@ -524,7 +530,14 @@ fn effective_perms(
             let id = ow.get("id").and_then(|i| i.as_str()).unwrap_or("");
             let allow = parse_bits(ow.get("allow"));
             let deny = parse_bits(ow.get("deny"));
-            let is_member = ow.get("type").and_then(|t| t.as_str()) == Some("member");
+            // Discord serializes Overwrite.type as an INTEGER: 0 = role,
+            // 1 = member. (Not the string "member" — that never appears.)
+            let is_member = match ow.get("type") {
+                Some(serde_json::Value::Number(n)) => n.as_u64() == Some(1),
+                // Tolerate the string form some fixtures/older docs use.
+                Some(serde_json::Value::String(s)) => s == "member",
+                _ => false,
+            };
             if is_member {
                 if id == member_id {
                     member_allow = allow;
@@ -565,13 +578,24 @@ async fn get_channels(
         other => return Ok(other),
     };
 
-    let member = get_json(&http, &format!("/guilds/{guild_id}/members/{member_id}")).await;
-    let guild = get_json(&http, &format!("/guilds/{guild_id}")).await;
+    // These two are independent of each other and of `channels` — fetch
+    // them concurrently instead of paying 3× the latency.
     // Fail closed: without permission data we cannot know what is hidden,
     // so show nothing rather than leaking private channels.
-    let (Ok(member), Ok(guild)) = (member, guild) else {
-        eprintln!("[disfast] get_channels {guild_id}: permission lookups failed, hiding all channels");
-        return Ok(serde_json::Value::Array(vec![]));
+    // Bind the URLs first: `join!` awaits both futures, so a temporary
+    // `format!()` would be dropped while still borrowed.
+    let member_url = format!("/guilds/{guild_id}/members/{member_id}");
+    let guild_url = format!("/guilds/{guild_id}");
+    let (member, guild) = tokio::join!(
+        get_json(&http, &member_url),
+        get_json(&http, &guild_url),
+    );
+    let (member, guild) = match (member, guild) {
+        (Ok(m), Ok(g)) => (m, g),
+        _ => {
+            eprintln!("[disfast] get_channels {guild_id}: permission lookups failed, hiding all channels");
+            return Ok(serde_json::Value::Array(vec![]));
+        }
     };
 
     if guild.get("owner_id").and_then(|v| v.as_str()) == Some(member_id.as_str()) {
@@ -933,14 +957,23 @@ mod tests {
         })
     }
 
+    fn perms_for(
+        ch: &serde_json::Value,
+        by_id: &HashMap<&str, &serde_json::Value>,
+        base: u64,
+        member_roles: &[&str],
+    ) -> u64 {
+        let roles: Vec<String> = member_roles.iter().map(|s| s.to_string()).collect();
+        effective_perms(ch, by_id, base, &roles, USER, GUILD)
+    }
+
     fn viewable(
         ch: &serde_json::Value,
         by_id: &HashMap<&str, &serde_json::Value>,
         base: u64,
         member_roles: &[&str],
     ) -> bool {
-        let roles: Vec<String> = member_roles.iter().map(|s| s.to_string()).collect();
-        channel_viewable(ch, by_id, base, &roles, USER, GUILD)
+        perms_for(ch, by_id, base, member_roles) & VIEW_CHANNEL != 0
     }
 
     #[test]
@@ -999,6 +1032,58 @@ mod tests {
         assert!(!viewable(&ch, &by_id, VIEW_CHANNEL, &[]));
     }
 
+    /// Real payloads use an INTEGER type (0 = role, 1 = member). This is
+    /// the regression test for that: the old string comparison silently
+    /// ignored every member-specific overwrite.
+    #[test]
+    fn integer_member_deny_overwrite_hides_channel_despite_role_allow() {
+        let ch = channel(
+            "c1",
+            None,
+            serde_json::json!([
+                {
+                    "id": ROLE_A,
+                    "type": 0,
+                    "allow": VIEW_CHANNEL.to_string(),
+                    "deny": "0",
+                },
+                {
+                    "id": USER,
+                    "type": 1,
+                    "allow": "0",
+                    "deny": VIEW_CHANNEL.to_string(),
+                },
+            ]),
+        );
+        let by_id = HashMap::from([("c1", &ch)]);
+        assert!(!viewable(&ch, &by_id, VIEW_CHANNEL, &[ROLE_A]));
+    }
+
+    #[test]
+    fn integer_member_allow_overrides_everyone_deny() {
+        let ch = channel(
+            "c1",
+            None,
+            serde_json::json!([
+                {
+                    "id": GUILD,
+                    "type": 0,
+                    "allow": "0",
+                    "deny": VIEW_CHANNEL.to_string(),
+                },
+                {
+                    "id": USER,
+                    "type": 1,
+                    "allow": VIEW_CHANNEL.to_string(),
+                    "deny": "0",
+                },
+            ]),
+        );
+        let by_id = HashMap::from([("c1", &ch)]);
+        assert!(viewable(&ch, &by_id, VIEW_CHANNEL, &[]));
+    }
+
+    /// The string form is tolerated for older fixtures.
     #[test]
     fn member_deny_overwrite_hides_channel_despite_role_allow() {
         let ch = channel(

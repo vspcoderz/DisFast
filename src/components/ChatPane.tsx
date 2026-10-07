@@ -1,4 +1,4 @@
-import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, events } from "../api";
 import { renderMarkdown } from "../markdown";
 import { IS_COMPONENTS_V2, type Message } from "../types";
@@ -7,26 +7,51 @@ import type { ActiveChannel } from "./Main";
 import { ComponentView, EmbedView } from "./RichContent";
 import { Avatar } from "./Avatar";
 
+/**
+ * Discord groups consecutive messages from the same author within 7
+ * minutes: no repeated avatar/name, just indented content. Without this
+ * every row repeats its header and the log reads flat.
+ */
+const GROUP_WINDOW_MS = 7 * 60 * 1000;
+
+function isGroupedWith(prev: Message | undefined, msg: Message): boolean {
+  if (!prev) return false;
+  if (prev.author.id !== msg.author.id) return false;
+  // Replies always start their own group.
+  if (prev.referenced_message || msg.referenced_message) return false;
+  const dt = new Date(msg.timestamp).getTime() - new Date(prev.timestamp).getTime();
+  return dt >= 0 && dt < GROUP_WINDOW_MS;
+}
+
 // Memoized so a new incoming message doesn't re-render the whole history —
 // the main source of "lag when messages arrive".
 const MessageRow = memo(function MessageRow({
   msg,
+  grouped,
   onImageClick,
 }: {
   msg: Message;
+  grouped: boolean;
   onImageClick: (url: string) => void;
 }) {
   const isV2 = ((msg.flags ?? 0) & IS_COMPONENTS_V2) !== 0;
   const reply = msg.referenced_message;
 
   return (
-    <div className="message" data-id={msg.id}>
-      <Avatar user={msg.author} size={38} />
+    <div className={`message${grouped ? " grouped" : ""}`} data-id={msg.id}>
+      {grouped ? (
+        // Timestamp appears in the left gutter only on hover, in the space
+        // the avatar column already reserves.
+        <span className="hover-time">{formatTime(msg.timestamp)}</span>
+      ) : (
+        <Avatar user={msg.author} size={40} />
+      )}
       <div className="body">
-        <div className="meta">
-          <span className="author">{displayName(msg.author)}</span>
-          <span className="time">{formatTime(msg.timestamp)}</span>
-        </div>
+        {!grouped && (
+          <div className="meta">
+            <span className="author">{displayName(msg.author)}</span>
+          </div>
+        )}
         {reply && (
           <div className="reply-ref">
             <span className="reply-author">{displayName(reply.author)}</span>
@@ -225,10 +250,27 @@ export function ChatPane({ channel, query }: Props) {
 
   // Client-side search over the loaded conversation (server-side search
   // with paging is a Phase 2 feature).
+  /**
+ * Derive grouping once per messages change instead of during render.
+ *
+ * `visible[i-1]` during render made every row's output depend on its
+ * predecessor, which defeated the memo on MessageRow: prepending history
+ * re-rendered the whole list, and each row re-ran the markdown regexes.
+ * Now row i depends only on messages[i-1], so appends render one row.
+ */
+  const rows = useMemo(() => {
+    const out: Array<{ msg: Message; grouped: boolean }> = [];
+    for (const msg of messages) {
+      out.push({ msg, grouped: isGroupedWith(out[out.length - 1]?.msg, msg) });
+    }
+    return out;
+  }, [messages]);
+
   const q = query.trim().toLowerCase();
-  const visible = q
-    ? messages.filter((m) => m.content.toLowerCase().includes(q))
-    : messages;
+  const visible = useMemo(
+    () => (q ? rows.filter((r) => r.msg.content.toLowerCase().includes(q)) : rows),
+    [rows, q],
+  );
 
   return (
     <main className="chat-pane">
@@ -237,8 +279,13 @@ export function ChatPane({ channel, query }: Props) {
           <div className="history-start">Beginning of conversation</div>
         )}
         {q && <div className="history-start">{visible.length} result{visible.length === 1 ? "" : "s"}</div>}
-        {visible.map((m) => (
-          <MessageRow key={m.id} msg={m} onImageClick={setLightbox} />
+        {visible.map((r) => (
+          <MessageRow
+            key={r.msg.id}
+            msg={r.msg}
+            grouped={r.grouped}
+            onImageClick={setLightbox}
+          />
         ))}
       </div>
       <div className="composer">

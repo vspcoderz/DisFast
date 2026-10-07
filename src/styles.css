@@ -1,17 +1,51 @@
 :root {
-  --bg-0: #111214;
-  --bg-1: #1e1f22;
-  --bg-2: #2b2d31;
-  --bg-3: #383a40;
-  --text: #dbdee1;
-  --text-dim: #949ba4;
+  /* Discord's dark-theme surface hierarchy. The chat pane must be the
+     LIGHTEST of the three columns or it reads as a hole in the app. */
+  --bg-0: #1e1f22; /* guild rail */
+  --bg-1: #303338; /* chat + chat header */
+  --bg-2: #2b2d31; /* channel pane, member list, profile panel */
+  --bg-3: #383a40; /* composer, inputs, hover */
+  --bg-4: #111214; /* modals, popovers, code blocks */
+
+  --text: #f2f3f5;
+  --text-2: #b5bac1; /* secondary labels: channels, members (7.0:1 on bg-2) */
+  --text-dim: #949ba4; /* tertiary: timestamps, hints */
+  --text-muted: #4e5058; /* placeholders, disabled icons */
+  --border: #1e1f22;
+
   --accent: #5865f2;
+
+  --anim-fast: 0.12s ease-out;
+  --anim-normal: 0.2s ease-out;
 }
 
 * {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
+}
+
+/* Keyboard focus must be visible — we remove outlines on inputs, so the
+   focus-visible ring is the only affordance keyboard users get. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: 4px;
+}
+
+::placeholder {
+  color: var(--text-dim);
+  opacity: 1;
+}
+
+/* Honour reduced-motion preferences across the whole app. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 html,
@@ -189,7 +223,7 @@ body,
 .guild-header {
   padding: 14px;
   font-weight: 700;
-  border-bottom: 1px solid var(--bg-0);
+  border-bottom: 1px solid var(--border);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -205,7 +239,9 @@ body,
 .channel-item {
   padding: 6px 8px;
   border-radius: 4px;
-  color: var(--text-dim);
+  /* --text-2 (7.0:1) instead of --text-dim (4.9:1): Discord's inactive
+     channel labels are secondary text, not tertiary */
+  color: var(--text-2);
   cursor: pointer;
   user-select: none;
   display: flex;
@@ -307,7 +343,7 @@ body,
 .chat-header {
   padding: 0 16px;
   font-weight: 700;
-  border-bottom: 1px solid var(--bg-0);
+  border-bottom: 1px solid var(--border);
   background: var(--bg-1);
 }
 
@@ -331,14 +367,49 @@ body,
 }
 
 .message {
+  position: relative; /* anchors .hover-time and message hover actions */
+  /* Skip layout/paint for off-screen messages. `auto` on the intrinsic
+     size makes this safe for our variable-height rows (embeds, images,
+     code blocks) — the browser learns each row's real height. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 56px;
   display: flex;
-  gap: 12px;
-  padding: 4px 8px;
-  border-radius: 4px;
+  gap: 16px;
+  /* 72px left gutter reserves the avatar column so grouped messages
+     indent into the same column without a spacer element */
+  padding: 2px 48px 2px 72px;
+  border-radius: 0;
+  transition: background-color 0.075s linear;
+}
+
+/* 8px between author groups, 2px between their consecutive messages */
+.message:not(.grouped) {
+  margin-top: 16px;
+}
+
+.message.grouped {
+  margin-top: 2px;
 }
 
 .message:hover {
   background: rgba(0, 0, 0, 0.15);
+  border-radius: 8px;
+}
+
+/* Timestamp only on hover, inside the reserved avatar gutter. */
+.hover-time {
+  position: absolute;
+  left: 16px;
+  top: 2px;
+  font-size: 11px;
+  color: var(--text-dim);
+  opacity: 0;
+  transition: opacity var(--anim-fast);
+  pointer-events: none;
+}
+
+.message:hover .hover-time {
+  opacity: 1;
 }
 
 .avatar-wrap {
@@ -387,14 +458,14 @@ body,
 }
 
 .message .content code {
-  background: var(--bg-0);
+  background: var(--bg-4);
   padding: 1px 4px;
   border-radius: 3px;
   font-size: 13px;
 }
 
 .message .content pre {
-  background: var(--bg-0);
+  background: var(--bg-4);
   padding: 10px;
   border-radius: 6px;
   margin: 6px 0;
@@ -992,6 +1063,9 @@ body,
   padding: 4px 8px;
   border-radius: 4px;
   cursor: pointer;
+  /* Fixed-height rows, so containment is trivially safe here */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 40px;
 }
 
 .member-row:hover {
@@ -1004,6 +1078,49 @@ body,
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* ---------- Scrollbars ----------
+   WebKitGTK defaults to a ~15px always-visible classic scrollbar, which
+   permanently steals width from the chat. Discord uses an 8px rounded
+   thumb that widens to 16px on hover. */
+.message-list,
+.channel-list,
+.member-sidebar,
+.profile-panel {
+  scrollbar-width: thin;
+  scrollbar-color: #1a1b1e transparent;
+}
+
+.message-list::-webkit-scrollbar,
+.channel-list::-webkit-scrollbar,
+.member-sidebar::-webkit-scrollbar,
+.profile-panel::-webkit-scrollbar {
+  width: 8px;
+}
+
+.message-list:hover::-webkit-scrollbar,
+.channel-list:hover::-webkit-scrollbar,
+.member-sidebar:hover::-webkit-scrollbar,
+.profile-panel:hover::-webkit-scrollbar {
+  width: 16px;
+}
+
+.message-list::-webkit-scrollbar-thumb,
+.channel-list::-webkit-scrollbar-thumb,
+.member-sidebar::-webkit-scrollbar-thumb,
+.profile-panel::-webkit-scrollbar-thumb {
+  background: #1a1b1e;
+  border: 4px solid transparent;
+  background-clip: content-box;
+  border-radius: 8px;
+}
+
+.message-list::-webkit-scrollbar-track,
+.channel-list::-webkit-scrollbar-track,
+.member-sidebar::-webkit-scrollbar-track,
+.profile-panel::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 /* ---------- Responsive ---------- */
@@ -1079,7 +1196,7 @@ body,
   padding: 5px 28px 5px 8px;
   border: none;
   border-radius: 4px;
-  background: var(--bg-0);
+  background: var(--bg-4);
   color: var(--text);
   font-size: 13px;
   transition: width 0.15s ease;
@@ -1088,6 +1205,14 @@ body,
 .chat-search input:focus {
   outline: none;
   width: 240px;
+}
+
+/* Focus is invisible on these because the accent ring would fight the
+   rounded input; use a glow instead of removing the indicator. */
+.chat-search input:focus-visible,
+.composer input:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(88, 101, 242, 0.55);
 }
 
 .chat-search-icon {
