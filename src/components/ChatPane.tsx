@@ -7,7 +7,7 @@ import {
   useState,
   type ClipboardEvent,
 } from "react";
-import { Link as LinkIcon, Paperclip, Pencil, Reply, Trash2 } from "lucide-react";
+import { Hash, Link as LinkIcon, Paperclip, Pencil, Reply, Trash2 } from "lucide-react";
 import { api, events } from "../api";
 import { renderMarkdown } from "../markdown";
 import { IS_COMPONENTS_V2, type Message } from "../types";
@@ -48,6 +48,7 @@ const MessageRow = memo(function MessageRow({
   onReply,
   onCopyLink,
   onComponentInteract,
+  onJumpTo,
 }: {
   msg: Message;
   grouped: boolean;
@@ -61,6 +62,7 @@ const MessageRow = memo(function MessageRow({
   onReply: (m: Message) => void;
   onCopyLink: (m: Message) => void;
   onComponentInteract: (i: Interaction) => void;
+  onJumpTo: (messageId: string) => void;
 }) {
   const isV2 = ((msg.flags ?? 0) & IS_COMPONENTS_V2) !== 0;
   const reply = msg.referenced_message;
@@ -122,12 +124,17 @@ const MessageRow = memo(function MessageRow({
         ) : (
           <>
         {reply && (
-          <div className="reply-ref">
+          <button
+            className="reply-ref"
+            onClick={() => onJumpTo(reply.id)}
+            title="Jump to original message"
+          >
+            <Paperclip size={12} className="reply-icon" />
             <span className="reply-author">{displayName(reply.author)}</span>
             <span className="reply-content">
-              {reply.content || (reply.attachments?.length ? "📎 Attachment" : "")}
+              {reply.content || (reply.attachments?.length ? "Attachment" : "")}
             </span>
-          </div>
+          </button>
         )}
         {msg.content ? (
           <div
@@ -210,6 +217,21 @@ function emojiKey(emoji: { id: string | null; name: string | null }): string {
   return emoji.name ?? (emoji.id ?? "");
 }
 
+/** "Today" / "Yesterday" / a date, for the day dividers. */
+function dateLabel(iso: string): string {
+  const d = new Date(iso);
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  if (d.toDateString() === today.toDateString()) return "Today";
+  if (d.toDateString() === yesterday.toDateString()) return "Yesterday";
+  return d.toLocaleDateString([], {
+    month: "long",
+    day: "numeric",
+    year: d.getFullYear() === today.getFullYear() ? undefined : "numeric",
+  });
+}
+
 /** Inline editor for an existing message. */
 function EditBox({
   initial,
@@ -262,6 +284,7 @@ export function ChatPane({
 }: Props) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [phase, setPhase] = useState<"loading" | "ready">("loading");
+  const [atBottom, setAtBottom] = useState(true);
   const [hasMore, setHasMore] = useState(true);
   const [draft, setDraft] = useState("");
   const [lightbox, setLightbox] = useState<string | null>(null);
@@ -417,6 +440,7 @@ export function ChatPane({
     if (!list) return;
     stickToBottom.current =
       list.scrollHeight - list.scrollTop - list.clientHeight < 60;
+    setAtBottom(stickToBottom.current);
     // Only trigger when actively scrolling *up* — not on programmatic
     // scroll changes (initial render starts at scrollTop 0).
     if (list.scrollTop < 100 && list.scrollTop < lastScrollTop.current) {
@@ -576,12 +600,32 @@ function readAsBase64(file: File): Promise<string> {
  * Now row i depends only on messages[i-1], so appends render one row.
  */
   const rows = useMemo(() => {
-    const out: Array<{ msg: Message; grouped: boolean }> = [];
+    const out: Array<{ msg: Message; grouped: boolean; divider: boolean }> = [];
+    let lastDay = "";
     for (const msg of messages) {
-      out.push({ msg, grouped: isGroupedWith(out[out.length - 1]?.msg, msg) });
+      const prev = out[out.length - 1]?.msg;
+      const day = new Date(msg.timestamp).toDateString();
+      out.push({
+        msg,
+        grouped: isGroupedWith(prev, msg),
+        // A date divider whenever the calendar day changes.
+        divider: prev != null && day !== lastDay,
+      });
+      lastDay = day;
     }
     return out;
   }, [messages]);
+
+  /** Scroll a message into view (used by reply references). */
+  function jumpTo(messageId: string) {
+    const el = document.querySelector<HTMLElement>(
+      `.message[data-id="${CSS.escape(messageId)}"]`,
+    );
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.classList.add("flash");
+    setTimeout(() => el.classList.remove("flash"), 1200);
+  }
 
   const q = query.trim().toLowerCase();
   const visible = useMemo(
@@ -591,30 +635,57 @@ function readAsBase64(file: File): Promise<string> {
 
   return (
     <main className="chat-pane">
+      {phase === "loading" ? (
+        <div className="message-list" aria-busy="true">
+          {Array.from({ length: 6 }, (_, i) => (
+            <div className="skeleton-row" key={i}>
+              <div className="skeleton skeleton-avatar" />
+              <div className="skeleton-col">
+                <div className="skeleton" style={{ width: 120 }} />
+                <div className="skeleton" style={{ width: `${45 + ((i * 13) % 45)}%` }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
       <div className="message-list" ref={listRef} onScroll={onScroll}>
         {!hasMore && messages.length > 0 && !q && (
           <div className="history-start">Beginning of conversation</div>
         )}
         {q && <div className="history-start">{visible.length} result{visible.length === 1 ? "" : "s"}</div>}
+        {phase === "ready" && messages.length === 0 && !q && (
+          <div className="chat-empty-state">
+            <Hash size={48} strokeWidth={1} />
+            <p>This is the beginning of {channel.name}.</p>
+          </div>
+        )}
         {visible.map((r) => (
-          <MessageRow
-            key={r.msg.id}
-            msg={r.msg}
-            grouped={r.grouped}
-            currentUserId={currentUserId}
-            editing={editingId === r.msg.id}
-            onImageClick={setLightbox}
-            onStartEdit={(m) => setEditingId(m.id)}
-            onCancelEdit={() => setEditingId(null)}
-            onSubmitEdit={submitEdit}
-            onDelete={remove}
-            onReply={(m) => {
-              setReplyTo(m);
-              document.querySelector<HTMLInputElement>(".composer input")?.focus();
-            }}
-            onCopyLink={copyLink}
-            onComponentInteract={(i) => interact(r.msg, i)}
-          />
+          <>
+            {r.divider && (
+              <div className="date-divider" key={`d-${r.msg.id}`}>
+                <span>{dateLabel(r.msg.timestamp)}</span>
+              </div>
+            )}
+            <MessageRow
+              key={r.msg.id}
+              msg={r.msg}
+              grouped={r.grouped}
+              currentUserId={currentUserId}
+              editing={editingId === r.msg.id}
+              onImageClick={setLightbox}
+              onStartEdit={(m) => setEditingId(m.id)}
+              onCancelEdit={() => setEditingId(null)}
+              onSubmitEdit={submitEdit}
+              onDelete={remove}
+              onReply={(m) => {
+                setReplyTo(m);
+                document.querySelector<HTMLInputElement>(".composer input")?.focus();
+              }}
+              onCopyLink={copyLink}
+              onComponentInteract={(i) => interact(r.msg, i)}
+              onJumpTo={jumpTo}
+            />
+          </>
         ))}
         {typingUsers.size > 0 && (
           <div className="typing-indicator">
@@ -625,6 +696,20 @@ function readAsBase64(file: File): Promise<string> {
           </div>
         )}
       </div>
+      )}
+      {!atBottom && (
+        <button
+          className="jump-to-present"
+          onClick={() => {
+            const list = listRef.current;
+            if (!list) return;
+            stickToBottom.current = true;
+            list.scrollTo({ top: list.scrollHeight, behavior: "smooth" });
+          }}
+        >
+          Jump to present
+        </button>
+      )}
       <div className="composer">
         {replyTo && (
           <div className="reply-bar">
