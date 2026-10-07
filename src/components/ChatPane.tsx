@@ -46,6 +46,7 @@ const MessageRow = memo(function MessageRow({
   onDelete,
   onReply,
   onCopyLink,
+  onComponentInteract,
 }: {
   msg: Message;
   grouped: boolean;
