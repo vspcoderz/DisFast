@@ -15,6 +15,7 @@ import { displayName, formatTime } from "../utils";
 import type { ActiveChannel } from "./Main";
 import { ComponentView, EmbedView, type Interaction } from "./RichContent";
 import { Avatar } from "./Avatar";
+import { LazyMedia } from "./LazyMedia";
 
 /**
  * Discord groups consecutive messages from the same author within 7
@@ -138,27 +139,38 @@ const MessageRow = memo(function MessageRow({
           msg.components?.map((c, i) => (
             <ComponentView key={i} c={c} onInteract={onInteract} />
           ))}
-        {msg.embeds?.map((embed, i) => <EmbedView key={i} embed={embed} />)}
-        {(msg.attachments ?? []).map((att) =>
-          att.content_type?.startsWith("image/") ? (
-            <img
-              key={att.id}
-              className="attachment-img"
-              src={att.url}
-              alt={att.filename}
-              loading="lazy"
-              onClick={() => onImageClick(att.url)}
-              style={
-                att.width && att.height
-                  ? { aspectRatio: `${att.width} / ${att.height}` }
-                  : undefined
-              }
-            />
-          ) : (
-            <a key={att.id} href={att.url} target="_blank" rel="noreferrer">
-              {att.filename}
-            </a>
-          ),
+        {(msg.embeds?.length ?? 0) > 0 && (
+          <LazyMedia>
+            {msg.embeds!.map((embed, i) => (
+              <EmbedView key={i} embed={embed} />
+            ))}
+          </LazyMedia>
+        )}
+        {(msg.attachments ?? []).length > 0 && (
+          <LazyMedia>
+            {msg.attachments!.map((att) =>
+              att.content_type?.startsWith("image/") ? (
+                <img
+                  key={att.id}
+                  className="attachment-img"
+                  src={att.url}
+                  alt={att.filename}
+                  loading="lazy"
+                  decoding="async"
+                  onClick={() => onImageClick(att.url)}
+                  style={
+                    att.width && att.height
+                      ? { aspectRatio: `${att.width} / ${att.height}` }
+                      : undefined
+                  }
+                />
+              ) : (
+                <a key={att.id} href={att.url} target="_blank" rel="noreferrer">
+                  {att.filename}
+                </a>
+              ),
+            )}
+          </LazyMedia>
         )}
         {msg.reactions && msg.reactions.length > 0 && (
           <div className="reactions">
