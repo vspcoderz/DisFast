@@ -81,12 +81,27 @@ export function EmbedView({ embed }: { embed: Embed }) {
  * Minimal Components V2 renderer. Unknown component types render their
  * children if present, otherwise nothing.
  */
-export function ComponentView({ c }: { c: MessageComponent }) {
+/** Payload for a component interaction (button press, select change). */
+export interface Interaction {
+  customId: string;
+  componentType: number;
+  values: string[];
+}
+
+export function ComponentView({
+  c,
+  onInteract,
+}: {
+  c: MessageComponent;
+  onInteract?: (i: Interaction) => void;
+}) {
   switch (c.type) {
     case 1: // ActionRow
       return (
         <div className="cv2-row">
-          {c.components?.map((child, i) => <ComponentView key={i} c={child} />)}
+          {c.components?.map((child, i) => (
+            <ComponentView key={i} c={child} onInteract={onInteract} />
+          ))}
         </div>
       );
     case 2: // Button
@@ -95,7 +110,19 @@ export function ComponentView({ c }: { c: MessageComponent }) {
           {c.label ?? c.url}
         </a>
       ) : (
-        <button className="cv2-button" disabled title="Buttons only work in the official client">
+        <button
+          className="cv2-button"
+          disabled={c.disabled}
+          onClick={() =>
+            onInteract
+              ? onInteract({
+                  customId: c.custom_id ?? "",
+                  componentType: 2,
+                  values: [],
+                })
+              : undefined
+          }
+        >
           {c.label ?? "Button"}
         </button>
       );
@@ -103,9 +130,11 @@ export function ComponentView({ c }: { c: MessageComponent }) {
       return (
         <div className="cv2-section">
           <div className="cv2-section-body">
-            {c.components?.map((child, i) => <ComponentView key={i} c={child} />)}
+            {c.components?.map((child, i) => (
+              <ComponentView key={i} c={child} onInteract={onInteract} />
+            ))}
           </div>
-          {c.accessory && <ComponentView c={c.accessory} />}
+          {c.accessory && <ComponentView c={c.accessory} onInteract={onInteract} />}
         </div>
       );
     case 10: // TextDisplay
@@ -133,13 +162,13 @@ export function ComponentView({ c }: { c: MessageComponent }) {
     case 17: // Container
       return (
         <div className="cv2-container" style={{ borderLeftColor: hexColor(c.accent_color) }}>
-          {c.components?.map((child, i) => <ComponentView key={i} c={child} />)}
+          {c.components?.map((child, i) => <ComponentView key={i} c={child} onInteract={onInteract} />)}
         </div>
       );
     default:
       return (
         <>
-          {c.components?.map((child, i) => <ComponentView key={i} c={child} />)}
+          {c.components?.map((child, i) => <ComponentView key={i} c={child} onInteract={onInteract} />)}
         </>
       );
   }

@@ -1080,6 +1080,343 @@ body,
   text-overflow: ellipsis;
 }
 
+/* ---------- Message actions / editing / typing ---------- */
+.message-actions {
+  position: absolute;
+  top: -14px;
+  right: 16px;
+  z-index: 2;
+  display: flex;
+  background: var(--bg-4);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 2px 4px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25);
+  opacity: 0;
+  transform: translateY(2px);
+  pointer-events: none;
+  transition: opacity var(--anim-fast), transform var(--anim-fast);
+}
+
+.message:hover .message-actions {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+
+.message-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.message-action:hover {
+  background: var(--bg-3);
+  color: var(--text);
+}
+
+.message-action.danger:hover {
+  color: #f23f43;
+}
+
+.edited {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.edit-box textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-2);
+  color: var(--text);
+  font-size: 15px;
+  font-family: inherit;
+  resize: vertical;
+}
+
+.edit-box textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.edit-hint {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.linkish {
+  background: none;
+  border: none;
+  padding: 0;
+  color: #00a8fc;
+  font: inherit;
+  cursor: pointer;
+}
+
+.spoiler {
+  background: var(--bg-4);
+  color: transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: color var(--anim-fast);
+}
+
+.spoiler:hover,
+.spoiler.revealed {
+  color: inherit;
+}
+
+.message .content .md-h {
+  font-size: 17px;
+  font-weight: 700;
+  margin: 4px 0 2px;
+}
+
+.message .content ul,
+.message .content ol {
+  padding-left: 22px;
+  margin: 2px 0;
+}
+
+.message .content .md-ol {
+  list-style: decimal;
+}
+
+.message .content .md-table {
+  border-collapse: collapse;
+  margin: 6px 0;
+  font-size: 14px;
+}
+
+.message .content .md-table th,
+.message .content .md-table td {
+  border: 1px solid var(--bg-3);
+  padding: 4px 8px;
+  text-align: left;
+}
+
+.message .content .md-table th {
+  background: var(--bg-2);
+  font-weight: 600;
+}
+
+.mention {
+  color: #00a8fc;
+  background: rgba(88, 101, 242, 0.1);
+  border-radius: 3px;
+  padding: 0 2px;
+  font-weight: 500;
+}
+
+.mention.role {
+  color: #f9a62b;
+}
+
+.message .content a {
+  color: #00a8fc;
+  text-decoration: none;
+}
+
+.message .content a:hover {
+  text-decoration: underline;
+}
+
+.reply-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  margin-bottom: 4px;
+  background: var(--bg-2);
+  border-left: 3px solid var(--accent);
+  border-radius: 4px 4px 0 0;
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+.reply-bar-text strong {
+  color: var(--text);
+}
+
+.reply-bar-close {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.reply-bar-close:hover {
+  color: var(--text);
+}
+
+.typing-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.typing-dots {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.typing-dots i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  animation: typing-bounce 1.2s infinite ease-in-out;
+}
+
+.typing-dots i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.typing-dots i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes typing-bounce {
+  0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-3px); }
+}
+
+.chat-toast {
+  position: absolute;
+  bottom: 70px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-4);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-size: 13px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
+  z-index: 10;
+}
+
+.chat-pane {
+  position: relative;
+}
+
+/* ---------- Composer attachments ---------- */
+.composer-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-3);
+  border-radius: 8px;
+  padding: 0 4px;
+}
+
+.composer-row input {
+  flex: 1;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 15px;
+  padding: 11px 8px;
+}
+
+.composer-row input:focus {
+  outline: none;
+}
+
+.composer-row input:disabled {
+  opacity: 0.6;
+}
+
+.composer-attach {
+  color: var(--text-2);
+}
+
+.pending-files {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.pending-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg-2);
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.pending-file-name {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pending-file-size {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.pending-file-remove {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.pending-file-remove:hover {
+  color: #f23f43;
+}
+
+/* ---------- Guild folders ---------- */
+.guild-folder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding-bottom: 4px;
+}
+
+.guild-folder-label {
+  width: 44px;
+  padding: 2px 0;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-dim);
+  font-size: 9px;
+  font-weight: 600;
+  text-align: center;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.guild-folder-label:hover {
+  background: var(--bg-2);
+  color: var(--text);
+}
+
 /* ---------- Scrollbars ----------
    WebKitGTK defaults to a ~15px always-visible classic scrollbar, which
    permanently steals width from the chat. Discord uses an 8px rounded

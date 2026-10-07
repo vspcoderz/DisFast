@@ -88,7 +88,13 @@ export interface Message {
   guild_id?: string | null;
   content: string;
   timestamp: string;
+  /** Set once the message has been edited. */
+  edited_timestamp?: string | null;
   author: User;
+  /** Users explicitly mentioned by this message. */
+  mentions?: User[];
+  mention_everyone?: boolean;
+  mention_roles?: string[];
   attachments: Attachment[];
   embeds?: Embed[];
   components?: MessageComponent[];
@@ -103,6 +109,12 @@ export interface Message {
   } | null;
   /** The message being replied to (if included) */
   referenced_message?: Message | null;
+  /** The app that owns this message's components */
+  application?: { id: string; name?: string } | null;
+  interaction_metadata?: {
+    authorizing_integration_owners?: Record<string, { application_id?: string }>;
+    original_response_message_id?: string | null;
+  };
 }
 
 /** MESSAGE_UPDATE payloads are partial — only changed fields are present. */
@@ -110,6 +122,24 @@ export type MessageUpdatePayload = Partial<Message> & {
   id: string;
   channel_id: string;
 };
+
+/** MESSAGE_REACTION_ADD / MESSAGE_REACTION_REMOVE */
+export interface MessageReactionPayload {
+  channel_id: string;
+  message_id: string;
+  user_id: string;
+  guild_id?: string | null;
+  emoji: { id: string | null; name: string | null };
+  member?: unknown;
+}
+
+/** TYPING_START */
+export interface TypingStartPayload {
+  channel_id: string;
+  guild_id?: string | null;
+  user_id: string;
+  timestamp: number;
+}
 
 export interface MessageDeletePayload {
   id: string;

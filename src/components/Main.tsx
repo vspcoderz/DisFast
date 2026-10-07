@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Menu, PanelRight, Phone, Pin, Search, UserPlus, Video } from "lucide-react";
 import { api, events } from "../api";
 import type { Channel, GatewayStatus, Guild, GuildSelection, User } from "../types";
+import { initNotifications, maybeNotify, notificationPermission } from "../notify";
 import { GuildSidebar } from "./GuildSidebar";
 import { ChannelPane, type DmTarget } from "./ChannelPane";
 import { ChatPane } from "./ChatPane";
@@ -54,6 +55,8 @@ export function Main({ user }: { user: User }) {
   // Ref mirror so the global message listener always sees the current channel
   const activeChannelRef = useRef<ActiveChannel | null>(null);
   activeChannelRef.current = activeChannel;
+  const [notifyEnabled, setNotifyEnabled] = useState(false);
+  const guildOfRef = useRef<(channelId: string) => string | null>(() => () => null);
 
   // Load guild list once.
   useEffect(() => {
@@ -89,6 +92,20 @@ export function Main({ user }: { user: User }) {
     };
   }, []);
 
+  // Desktop notifications for mentions in channels you're not viewing.
+  useEffect(() => {
+    initNotifications(() => {});
+    setNotifyEnabled(notificationPermission() === "granted");
+  }, []);
+
+  // Remember which guild each channel belongs to, for notification links.
+  useEffect(() => {
+    const map = new Map<string, string>();
+    for (const g of guilds) map.set(g.id, g.id);
+    for (const ch of channels) map.set(ch.id, activeGuild === "dm" ? "" : activeGuild);
+    guildOfRef.current = (channelId: string) => map.get(channelId) ?? null;
+  }, [guilds, channels, activeGuild]);
+
   // Gateway connection status → status dot in the user bar.
   useEffect(() => {
     const unlisten = events.onGatewayStatus((s) => setGatewayStatus(s));
@@ -101,6 +118,12 @@ export function Main({ user }: { user: User }) {
   // (ChatPane separately handles messages for the open channel.)
   useEffect(() => {
     const unlisten = events.onMessageCreate((msg) => {
+      maybeNotify(msg, {
+        enabled: notifyEnabled,
+        activeChannelId: activeChannelRef.current?.id ?? null,
+        currentUserId: user.id,
+        guildOf: (channelId) => guildOfRef.current(channelId),
+      });
       // DM channels jump to the top of the list on activity.
       if (msg.guild_id == null) {
         setDms((prev) => {
@@ -126,7 +149,7 @@ export function Main({ user }: { user: User }) {
     return () => {
       unlisten.then((f) => f());
     };
-  }, [user.id]);
+  }, [user.id, notifyEnabled]);
 
   const selectGuild = useCallback(async (sel: GuildSelection) => {
     setActiveGuild(sel);
@@ -241,7 +264,12 @@ export function Main({ user }: { user: User }) {
       </header>
 
       {activeChannel ? (
-        <ChatPane key={channelKey(activeChannel)} channel={activeChannel} query={query} />
+        <ChatPane
+          key={channelKey(activeChannel)}
+          channel={activeChannel}
+          query={query}
+          currentUserId={user.id}
+        />
       ) : (
         <main className="chat-pane" />
       )}

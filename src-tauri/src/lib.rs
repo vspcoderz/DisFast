@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use base64::Engine as _;
+
 use futures_util::{SinkExt as _, StreamExt as _};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, USER_AGENT};
 use tauri::{AppHandle, Emitter, State};
@@ -8,6 +10,11 @@ use tokio::sync::Mutex;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 
 const API_BASE: &str = "https://discord.com/api/v9";
+
+/// Standard base64 alphabet with padding — matches what the browser's
+/// `FileReader.readAsDataURL` produces once we strip the data-URL prefix.
+const BASE64: base64::engine::general_purpose::GeneralPurpose =
+    base64::engine::general_purpose::STANDARD;
 
 /// Everything we hold after a successful login.
 struct DiscordSession {
@@ -21,7 +28,12 @@ struct DiscordSession {
     users: SharedUsers,
     /// Our own user ID (needed for permission resolution).
     user_id: String,
+    /// Write half of the live gateway socket, so commands (component
+    /// interactions) can push op-3 frames onto the existing connection.
+    gateway_tx: SharedGatewayTx,
 }
+
+type SharedGatewayTx = Arc<Mutex<Option<tokio::sync::mpsc::UnboundedSender<WsMessage>>>>;
 
 type SharedSession = Arc<Mutex<Option<DiscordSession>>>;
 type SharedDms = Arc<Mutex<Vec<serde_json::Value>>>;
@@ -128,6 +140,7 @@ async fn run_gateway(
     dms: SharedDms,
     users: SharedUsers,
     session_id: SharedSessionId,
+    gateway_tx: SharedGatewayTx,
 ) {
     const MAX_ATTEMPTS: u32 = 5;
 
@@ -135,7 +148,7 @@ async fn run_gateway(
         let _ = app.emit("gateway-status", "connecting");
         eprintln!("[disfast] gateway: connecting (attempt {attempt}/{MAX_ATTEMPTS})");
 
-        match connect_and_pump(&app, &token, &dms, &users, &session_id).await {
+        match connect_and_pump(&app, &token, &dms, &users, &session_id, &gateway_tx).await {
             PumpResult::Ready => {
                 eprintln!("[disfast] gateway: connection closed after READY");
             }
@@ -171,6 +184,7 @@ async fn connect_and_pump(
     dms: &SharedDms,
     users: &SharedUsers,
     session_id: &SharedSessionId,
+    gateway_tx: &SharedGatewayTx,
 ) -> PumpResult {
     use tokio_tungstenite::connect_async;
 
@@ -193,6 +207,14 @@ async fn connect_and_pump(
                 break;
             }
         }
+    });
+
+    // Publish the writer so Tauri commands (component interactions) can
+    // push frames onto this connection. Dropped when the socket dies.
+    let tx_clone = tx.clone();
+    let publish = Arc::clone(&gateway_tx);
+    tokio::spawn(async move {
+        *publish.lock().await = Some(tx_clone);
     });
 
     let send = |msg: WsMessage| {
@@ -259,7 +281,11 @@ async fn connect_and_pump(
                         },
                         "compress": false,
                         "large_threshold": 250,
-                        "intents": 37377,
+                        // GUILDS | GUILD_MESSAGES | GUILD_MESSAGE_REACTIONS
+                        // | GUILD_MESSAGE_TYPING | DIRECT_MESSAGES
+                        // | DIRECT_MESSAGE_REACTIONS | DIRECT_MESSAGE_TYPING
+                        // | MESSAGE_CONTENT
+                        "intents": 1 | 512 | 1024 | 2048 | 4096 | 8192 | 16384 | 32768,
                     },
                 });
                 send(WsMessage::Text(identify.to_string().into()));
@@ -321,6 +347,21 @@ async fn connect_and_pump(
                     }
                     "MESSAGE_DELETE" => {
                         let _ = app.emit("message-delete", &data);
+                    }
+                    "MESSAGE_DELETE_BULK" => {
+                        let _ = app.emit("message-delete-bulk", &data);
+                    }
+                    "MESSAGE_REACTION_ADD" | "MESSAGE_REACTION_REMOVE" => {
+                        let _ = app.emit("message-reaction", &data);
+                    }
+                    "TYPING_START" => {
+                        let _ = app.emit("typing-start", &data);
+                    }
+                    "CHANNEL_UPDATE" => {
+                        let _ = app.emit("channel-update", &data);
+                    }
+                    "CHANNEL_PINS_UPDATE" => {
+                        let _ = app.emit("channel-pins-update", &data);
                     }
                     "CHANNEL_CREATE" => {
                         let kind = data.get("type").and_then(|t| t.as_u64()).unwrap_or(0);
@@ -395,6 +436,8 @@ async fn login(
     let already_connected = guard.is_some();
     let dms: SharedDms = Arc::new(Mutex::new(Vec::new()));
     let users: SharedUsers = Arc::new(Mutex::new(HashMap::new()));
+    // Created here so the gateway task and the session share one writer.
+    let gateway_tx: SharedGatewayTx = Arc::new(Mutex::new(None));
     *guard = Some(DiscordSession {
         http: client,
         dms: Arc::clone(&dms),
@@ -404,6 +447,7 @@ async fn login(
             .and_then(|v| v.as_str())
             .unwrap_or_default()
             .to_string(),
+        gateway_tx: Arc::clone(&gateway_tx),
     });
     drop(guard);
 
@@ -411,7 +455,7 @@ async fn login(
         let app2 = app.clone();
         let sid = Arc::clone(&session_id.inner());
         tokio::spawn(async move {
-            run_gateway(app2, token, dms, users, sid).await;
+            run_gateway(app2, token, dms, users, sid, gateway_tx).await;
         });
     }
 
@@ -864,17 +908,27 @@ async fn send_message(
     state: State<'_, SharedSession>,
     channel_id: String,
     content: String,
+    reply_to: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let http = http(&state).await?;
     let content = content.trim().to_string();
     if content.is_empty() {
         return Err("empty message".to_string());
     }
+    // A reply is a normal message plus `message_reference`; `replied_user`
+    // controls whether the original author gets a notification ping.
+    let mut payload = serde_json::json!({
+        "content": content,
+        "allowed_mentions": { "replied_user": true },
+    });
+    if let Some(reply_to) = reply_to {
+        payload["message_reference"] = serde_json::json!({ "message_id": reply_to });
+    }
     let url = format!("{API_BASE}/channels/{channel_id}/messages");
     for attempt in 0..3 {
         let res = http
             .post(&url)
-            .json(&serde_json::json!({ "content": content }))
+            .json(&payload)
             .send()
             .await
             .map_err(|e| e.to_string())?;
@@ -893,6 +947,279 @@ async fn send_message(
         return res.json().await.map_err(|e| e.to_string());
     }
     unreachable!()
+}
+
+/// Upload a file to a channel and post a message with it.
+///
+/// Discord's message endpoint accepts `multipart/form-data`: a
+/// `payload_json` field carrying the message, plus file parts named
+/// `files[0]`, `files[1]`, ... Limits are 20 MiB per file (higher with
+/// Nitro), 25 MiB per request, 10 files per message.
+#[tauri::command]
+async fn upload_attachment(
+    state: State<'_, SharedSession>,
+    channel_id: String,
+    filename: String,
+    // Base64 file bytes, as read by the frontend FileReader.
+    data_base64: String,
+) -> Result<serde_json::Value, String> {
+    let http = http(&state).await?;
+    if filename.is_empty() {
+        return Err("no filename".to_string());
+    }
+    let bytes = BASE64
+        .decode(data_base64.trim())
+        .map_err(|e| format!("bad file data: {e}"))?;
+    // Discord rejects oversized bodies with 413; catch it before the round trip.
+    if bytes.len() > 20 * 1024 * 1024 {
+        return Err("file exceeds Discord's 20 MiB limit".to_string());
+    }
+
+    let payload = serde_json::json!({ "attachments": [{ "id": 0, "filename": filename }] });
+    let part = reqwest::multipart::Part::bytes(bytes)
+        .file_name(filename)
+        .mime_str("application/octet-stream")
+        .map_err(|e| e.to_string())?;
+
+    let form = reqwest::multipart::Form::new()
+        .text("payload_json", payload.to_string())
+        .part("files[0]", part);
+
+    let url = format!("{API_BASE}/channels/{channel_id}/messages");
+    let res = http
+        .post(&url)
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let status = res.status();
+    if !status.is_success() {
+        let body = res.text().await.unwrap_or_default();
+        return Err(format!("upload failed ({status}): {body}"));
+    }
+    res.json().await.map_err(|e| e.to_string())
+}
+
+/// Send a message with an already-uploaded attachment (the two-step
+/// pre-signed flow Discord's own client uses). `attachment_id` is the
+/// `id` returned by a single-file upload.
+#[tauri::command]
+async fn send_with_attachment(
+    state: State<'_, SharedSession>,
+    channel_id: String,
+    content: String,
+    attachment_id: String,
+    filename: String,
+) -> Result<serde_json::Value, String> {
+    let http = http(&state).await?;
+    let url = format!("{API_BASE}/channels/{channel_id}/messages");
+    let payload = serde_json::json!({
+        "content": content,
+        "attachments": [{ "id": attachment_id, "filename": filename }],
+    });
+    let res = http
+        .post(&url)
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let status = res.status();
+    if !status.is_success() {
+        let body = res.text().await.unwrap_or_default();
+        return Err(format!("send failed ({status}): {body}"));
+    }
+    res.json().await.map_err(|e| e.to_string())
+}
+
+/// Folders aren't available over the REST API any more (the
+/// /users/@me/guild-folders endpoint 404s), so the frontend groups
+/// servers locally. This command exists only so the frontend can confirm
+/// which guilds exist before building groups.
+#[tauri::command]
+async fn get_guild_ids(state: State<'_, SharedSession>) -> Result<serde_json::Value, String> {
+    let guilds = get_guilds(state).await?;
+    Ok(guilds)
+}
+
+/// Submit a message component interaction (button click, select change).
+///
+/// These go over the gateway as op 3, not REST. Requires the READY
+/// session id and the application id, which lives on the message
+/// (`application.id` or the authorizing integration's application).
+#[tauri::command]
+async fn interact_component(
+    state: State<'_, SharedSession>,
+    session_id: State<'_, SharedSessionId>,
+    application_id: String,
+    channel_id: String,
+    message_id: String,
+    guild_id: Option<String>,
+    component_type: u8,
+    custom_id: String,
+    values: Vec<String>,
+) -> Result<(), String> {
+    let (tx, sid) = {
+        let guard = state.inner().lock().await;
+        let session = guard.as_ref().ok_or("not logged in")?;
+        (session.gateway_tx.clone(), session_id.inner().clone())
+    };
+    let sid = sid.lock().await.clone().ok_or("gateway not ready")?;
+    let writer = tx.lock().await.clone().ok_or("gateway not connected")?;
+
+    let mut data = serde_json::json!({
+        "component_type": component_type,
+        "custom_id": custom_id,
+    });
+    if !values.is_empty() {
+        data["values"] = serde_json::Value::Array(
+            values.into_iter().map(serde_json::Value::String).collect(),
+        );
+    }
+
+    let mut payload = serde_json::json!({
+        "application_id": application_id,
+        "session_id": sid,
+        "channel_id": channel_id,
+        "message_id": message_id,
+        "data": data,
+    });
+    if let Some(guild_id) = guild_id {
+        payload["guild_id"] = serde_json::Value::String(guild_id);
+    }
+
+    let frame = serde_json::json!({ "op": 3, "d": payload });
+    writer
+        .send(WsMessage::Text(frame.to_string().into()))
+        .map_err(|_| "gateway send failed".to_string())
+}
+
+/// Edit an existing message. Discord allows editing your own messages
+/// within 15 minutes; beyond that (or for others' messages) you need
+/// MANAGE_MESSAGES, and the API rejects it with 403.
+#[tauri::command]
+async fn edit_message(
+    state: State<'_, SharedSession>,
+    channel_id: String,
+    message_id: String,
+    content: String,
+) -> Result<serde_json::Value, String> {
+    let http = http(&state).await?;
+    let content = content.trim().to_string();
+    if content.is_empty() {
+        return Err("empty message".to_string());
+    }
+    let url = format!("{API_BASE}/channels/{channel_id}/messages/{message_id}");
+    let res = http
+        .patch(&url)
+        .json(&serde_json::json!({ "content": content }))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let status = res.status();
+    if !status.is_success() {
+        let body = res.text().await.unwrap_or_default();
+        return Err(match status.as_u16() {
+            403 => "You can only edit your own messages, and only within 15 minutes."
+                .to_string(),
+            _ => format!("edit failed ({status}): {body}"),
+        });
+    }
+    res.json().await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn delete_message(
+    state: State<'_, SharedSession>,
+    channel_id: String,
+    message_id: String,
+) -> Result<(), String> {
+    let http = http(&state).await?;
+    let url = format!("{API_BASE}/channels/{channel_id}/messages/{message_id}");
+    let res = http
+        .delete(&url)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let status = res.status();
+    if !status.is_success() {
+        let body = res.text().await.unwrap_or_default();
+        return Err(match status.as_u16() {
+            403 => {
+                "You can only delete your own messages, or others' with Manage Messages."
+                    .to_string()
+            }
+            _ => format!("delete failed ({status}): {body}"),
+        });
+    }
+    Ok(())
+}
+
+/// Signal that the user is typing. Discord's indicator expires after 10
+/// seconds, so the frontend throttles calls to roughly every 8.
+#[tauri::command]
+async fn send_typing(
+    state: State<'_, SharedSession>,
+    channel_id: String,
+) -> Result<(), String> {
+    let http = http(&state).await?;
+    let url = format!("{API_BASE}/channels/{channel_id}/typing");
+    let res = http
+        .post(&url)
+        .json(&serde_json::json!({}))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let status = res.status();
+    if !status.is_success() {
+        let body = res.text().await.unwrap_or_default();
+        return Err(format!("typing failed ({status}): {body}"));
+    }
+    Ok(())
+}
+
+/// Pinned messages for a channel. `GET /channels/{id}/messages/pins`
+/// (the older `/channels/{id}/pins` route is deprecated).
+#[tauri::command]
+async fn get_pins(
+    state: State<'_, SharedSession>,
+    channel_id: String,
+) -> Result<serde_json::Value, String> {
+    let http = http(&state).await?;
+    get_json(&http, &format!("/channels/{channel_id}/messages/pins")).await
+}
+
+#[tauri::command]
+async fn add_pin(
+    state: State<'_, SharedSession>,
+    channel_id: String,
+    message_id: String,
+) -> Result<(), String> {
+    let http = http(&state).await?;
+    let url = format!("{API_BASE}/channels/{channel_id}/messages/pins/{message_id}");
+    let res = http.put(&url).send().await.map_err(|e| e.to_string())?;
+    let status = res.status();
+    if !status.is_success() {
+        let body = res.text().await.unwrap_or_default();
+        return Err(format!("pin failed ({status}): {body}"));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn remove_pin(
+    state: State<'_, SharedSession>,
+    channel_id: String,
+    message_id: String,
+) -> Result<(), String> {
+    let http = http(&state).await?;
+    let url = format!("{API_BASE}/channels/{channel_id}/messages/pins/{message_id}");
+    let res = http.delete(&url).send().await.map_err(|e| e.to_string())?;
+    let status = res.status();
+    if !status.is_success() {
+        let body = res.text().await.unwrap_or_default();
+        return Err(format!("unpin failed ({status}): {body}"));
+    }
+    Ok(())
 }
 
 /// Dev convenience: read a token from `secret.env` in the project root
@@ -918,6 +1245,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(Arc::new(Mutex::new(None)) as SharedSession)
         .manage(Arc::new(Mutex::new(None)) as SharedSessionId)
+        .manage(Arc::new(Mutex::new(None)) as SharedGatewayTx)
         .invoke_handler(tauri::generate_handler![
             auth_login,
             auth_mfa_totp,
@@ -927,11 +1255,21 @@ pub fn run() {
             get_channels,
             get_messages,
             send_message,
+            upload_attachment,
+            send_with_attachment,
+            get_guild_ids,
+            edit_message,
+            delete_message,
+            send_typing,
+            get_pins,
+            add_pin,
+            remove_pin,
             add_reaction,
             remove_reaction,
             get_members,
             get_roles,
             get_user_profile,
+            interact_component,
             create_invite,
             get_dev_token,
         ])

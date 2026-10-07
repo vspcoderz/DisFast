@@ -1,10 +1,11 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Link as LinkIcon, Paperclip, Pencil, Reply, Trash2 } from "lucide-react";
 import { api, events } from "../api";
 import { renderMarkdown } from "../markdown";
 import { IS_COMPONENTS_V2, type Message } from "../types";
 import { displayName, formatTime } from "../utils";
 import type { ActiveChannel } from "./Main";
-import { ComponentView, EmbedView } from "./RichContent";
+import { ComponentView, EmbedView, type Interaction } from "./RichContent";
 import { Avatar } from "./Avatar";
 
 /**
@@ -28,14 +29,33 @@ function isGroupedWith(prev: Message | undefined, msg: Message): boolean {
 const MessageRow = memo(function MessageRow({
   msg,
   grouped,
+  currentUserId,
+  editing,
   onImageClick,
+  onStartEdit,
+  onCancelEdit,
+  onSubmitEdit,
+  onDelete,
+  onReply,
+  onCopyLink,
 }: {
   msg: Message;
   grouped: boolean;
+  currentUserId: string;
+  editing: boolean;
   onImageClick: (url: string) => void;
+  onStartEdit: (m: Message) => void;
+  onCancelEdit: () => void;
+  onSubmitEdit: (m: Message, content: string) => void;
+  onDelete: (m: Message) => void;
+  onReply: (m: Message) => void;
+  onCopyLink: (m: Message) => void;
+  onInteractProp: (m: Message, i: Interaction) => void;
 }) {
   const isV2 = ((msg.flags ?? 0) & IS_COMPONENTS_V2) !== 0;
   const reply = msg.referenced_message;
+  const isMine = msg.author.id === currentUserId;
+  const onInteract = (i: Interaction) => onInteractProp(msg, i);
 
   return (
     <div className={`message${grouped ? " grouped" : ""}`} data-id={msg.id}>
@@ -50,8 +70,43 @@ const MessageRow = memo(function MessageRow({
         {!grouped && (
           <div className="meta">
             <span className="author">{displayName(msg.author)}</span>
+            <span className="time">{formatTime(msg.timestamp)}</span>
+            {msg.edited_timestamp && (
+              <span className="edited" title="Edited">
+                (edited)
+              </span>
+            )}
           </div>
         )}
+
+        {/* Hover action bar */}
+        <div className="message-actions">
+          <button className="message-action" title="Reply" onClick={() => onReply(msg)}>
+            <Reply size={16} />
+          </button>
+          <button className="message-action" title="Copy link" onClick={() => onCopyLink(msg)}>
+            <LinkIcon size={16} />
+          </button>
+          {isMine && (
+            <button className="message-action" title="Edit" onClick={() => onStartEdit(msg)}>
+              <Pencil size={16} />
+            </button>
+          )}
+          {isMine && (
+            <button className="message-action danger" title="Delete" onClick={() => onDelete(msg)}>
+              <Trash2 size={16} />
+            </button>
+          )}
+        </div>
+
+        {editing ? (
+          <EditBox
+            initial={msg.content}
+            onCancel={onCancelEdit}
+            onSubmit={(content) => onSubmitEdit(msg, content)}
+          />
+        ) : (
+          <>
         {reply && (
           <div className="reply-ref">
             <span className="reply-author">{displayName(reply.author)}</span>
@@ -66,7 +121,10 @@ const MessageRow = memo(function MessageRow({
             dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }}
           />
         ) : null}
-        {isV2 && msg.components?.map((c, i) => <ComponentView key={i} c={c} />)}
+        {isV2 &&
+          msg.components?.map((c, i) => (
+            <ComponentView key={i} c={c} onInteract={onInteract} />
+          ))}
         {msg.embeds?.map((embed, i) => <EmbedView key={i} embed={embed} />)}
         {(msg.attachments ?? []).map((att) =>
           att.content_type?.startsWith("image/") ? (
@@ -116,6 +174,8 @@ const MessageRow = memo(function MessageRow({
             ))}
           </div>
         )}
+          </>
+        )}
       </div>
     </div>
   );
@@ -125,21 +185,67 @@ function emojiKey(emoji: { id: string | null; name: string | null }): string {
   return emoji.name ?? (emoji.id ?? "");
 }
 
+/** Inline editor for an existing message. */
+function EditBox({
+  initial,
+  onCancel,
+  onSubmit,
+}: {
+  initial: string;
+  onCancel: () => void;
+  onSubmit: (content: string) => void;
+}) {
+  const [value, setValue] = useState(initial);
+  return (
+    <div className="edit-box">
+      <textarea
+        autoFocus
+        rows={2}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") {
+            e.stopPropagation();
+            onCancel();
+          }
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            onSubmit(value.trim());
+          }
+        }}
+      />
+      <div className="edit-hint">
+        escape to <button className="linkish" onClick={onCancel}>cancel</button> •{" "}
+        enter to <button className="linkish" onClick={() => onSubmit(value.trim())}>save</button>
+      </div>
+    </div>
+  );
+}
+
 interface Props {
   channel: ActiveChannel;
   query: string;
+  currentUserId: string;
 }
 
-export function ChatPane({ channel, query }: Props) {
+export function ChatPane({ channel, query, currentUserId }: Props) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [hasMore, setHasMore] = useState(true);
   const [draft, setDraft] = useState("");
   const [lightbox, setLightbox] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [replyTo, setReplyTo] = useState<Message | null>(null);
+  const [typingUsers, setTypingUsers] = useState<Map<string, number>>(new Map());
+  const [toast, setToast] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const loadingHistory = useRef(false);
   const stickToBottom = useRef(true);
   const lastScrollTop = useRef(0);
   const pendingAnchor = useRef<number | null>(null);
+  const lastTypingSent = useRef(0);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Initial load. The API returns newest first; we store oldest→newest.
   useEffect(() => {
@@ -179,11 +285,60 @@ export function ChatPane({ channel, query }: Props) {
         if (channel_id !== channel.id) return;
         setMessages((prev) => prev.filter((m) => m.id !== id));
       }),
+      events.onMessageDeleteBulk(({ ids, channel_id }) => {
+        if (channel_id !== channel.id) return;
+        const gone = new Set(ids);
+        setMessages((prev) => prev.filter((m) => !gone.has(m.id)));
+      }),
+      // Someone else reacting to a message we're showing.
+      events.onMessageReaction((p) => {
+        if (p.channel_id !== channel.id) return;
+        setMessages((prev) =>
+          prev.map((m) => {
+            if (m.id !== p.message_id) return m;
+            const reactions = [...(m.reactions ?? [])];
+            const key = emojiKey(p.emoji);
+            const idx = reactions.findIndex((r) => emojiKey(r.emoji) === key);
+            if (idx === -1) return m;
+            if (p.user_id === currentUserId) {
+              // Our own toggle is already handled optimistically by the
+              // button; the gateway event is the confirmation.
+              return m;
+            }
+            // We can't tell add from remove without the event name, so
+            // reconcile against the count Discord sends in MESSAGE_UPDATE.
+            return m;
+          }),
+        );
+      }),
+      events.onTypingStart((p) => {
+        if (p.channel_id !== channel.id || p.user_id === currentUserId) return;
+        const now = Date.now();
+        setTypingUsers((prev) => {
+          const next = new Map(prev);
+          next.set(p.user_id, now);
+          return next;
+        });
+      }),
     ];
     return () => {
       unlisteners.forEach((p) => p.then((unlisten) => unlisten()));
     };
-  }, [channel.id]);
+  }, [channel.id, currentUserId]);
+
+  // Expire typing indicators after Discord's 10s window.
+  useEffect(() => {
+    const t = setInterval(() => {
+      const cutoff = Date.now() - 10000;
+      setTypingUsers((prev) => {
+        if (prev.size === 0) return prev;
+        const next = new Map<string, number>();
+        for (const [id, ts] of prev) if (ts > cutoff) next.set(id, ts);
+        return next.size === prev.size ? prev : next;
+      });
+    }, 2000);
+    return () => clearInterval(t);
+  }, []);
 
   // Keep scrolled to the bottom when new messages arrive and the user
   // hasn't scrolled up.
@@ -234,18 +389,143 @@ export function ChatPane({ channel, query }: Props) {
     lastScrollTop.current = list.scrollTop;
   }
 
+  /** Read a File as base64 (stripping the data-URL prefix) for the Rust side. */
+function readAsBase64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = String(reader.result);
+        const comma = result.indexOf(",");
+        resolve(comma >= 0 ? result.slice(comma + 1) : result);
+      };
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+  }
+
   async function send() {
     const content = draft.trim();
-    if (!content) return;
+    if (!content && pendingFiles.length === 0) return;
     setDraft("");
     stickToBottom.current = true;
+
+    // Attachments go up first (one request per file), then the message
+    // text rides along with the first attachment.
+    if (pendingFiles.length > 0) {
+      setUploading(true);
+      try {
+        const first = pendingFiles[0];
+        const data = await readAsBase64(first);
+        await api.uploadAttachment(channel.id, first.name, data);
+        if (content) {
+          await api.sendMessage(channel.id, content, replyTo?.id);
+        }
+        // Extras upload as their own messages (Discord's client does the
+        // same for multi-file past the first).
+        for (const extra of pendingFiles.slice(1)) {
+          const d = await readAsBase64(extra);
+          await api.uploadAttachment(channel.id, extra.name, d);
+        }
+        setPendingFiles([]);
+        setReplyTo(null);
+      } catch (e) {
+        setDraft(content);
+        setToast(String(e));
+      } finally {
+        setUploading(false);
+      }
+      return;
+    }
+
     try {
-      await api.sendMessage(channel.id, content);
+      await api.sendMessage(channel.id, content, replyTo?.id);
+      setReplyTo(null);
       // The gateway echoes the message back via message-create.
     } catch (e) {
       setDraft(content); // restore on failure
       console.error("send failed:", e);
     }
+  }
+
+  /** Paste images straight into the composer. */
+  function onPaste(e: React.ClipboardEvent) {
+    const items = Array.from(e.clipboardData.items);
+    const files = items
+      .filter((i) => i.kind === "file" && i.type.startsWith("image/"))
+      .map((i) => i.getAsFile())
+      .filter((f): f is File => f != null);
+    if (files.length > 0) {
+      e.preventDefault();
+      setPendingFiles((prev) => [...prev, ...files]);
+    }
+  }
+
+  /** Discord's typing indicator expires after 10s; send at most every 8. */
+  function notifyTyping() {
+    const now = Date.now();
+    if (now - lastTypingSent.current < 8000) return;
+    lastTypingSent.current = now;
+    api.sendTyping(channel.id).catch(() => {});
+  }
+
+  async function submitEdit(msg: Message, content: string) {
+    if (!content || content === msg.content) {
+      setEditingId(null);
+      return;
+    }
+    try {
+      await api.editMessage(channel.id, msg.id, content);
+      setEditingId(null);
+    } catch (e) {
+      setToast(String(e));
+      setEditingId(null);
+    }
+  }
+
+  async function remove(msg: Message) {
+    try {
+      await api.deleteMessage(channel.id, msg.id);
+      setMessages((prev) => prev.filter((m) => m.id !== msg.id));
+    } catch (e) {
+      setToast(String(e));
+    }
+  }
+
+  /** discord.com/channels/{guild}/{channel}/{message} — omit guild for DMs. */
+  /** Buttons/selects go over gateway op 3; Discord answers with a MESSAGE_UPDATE. */
+  async function interact(msg: Message, i: Interaction) {
+    const appId =
+      msg.application?.id ??
+      Object.values(msg.interaction_metadata?.authorizing_integration_owners ?? {})[0]
+        ?.application_id;
+    if (!appId) {
+      setToast("This interaction can't be sent from a third-party client.");
+      return;
+    }
+    try {
+      await api.interactComponent({
+        applicationId: appId,
+        channelId: channel.id,
+        messageId: msg.id,
+        guildId: msg.guild_id ?? null,
+        componentType: i.componentType,
+        customId: i.customId,
+        values: i.values,
+      });
+    } catch (e) {
+      setToast(String(e));
+    }
+  }
+
+  function copyLink(msg: Message) {
+    const guildPart = msg.guild_id ? msg.guild_id : "@me";
+    navigator.clipboard
+      .writeText(`https://discord.com/channels/${guildPart}/${channel.id}/${msg.id}`)
+      .then(() => {
+        setToast("Message link copied");
+        setTimeout(() => setToast(null), 1500);
+      })
+      .catch(() => setToast("Could not copy link"));
   }
 
   // Client-side search over the loaded conversation (server-side search
@@ -284,22 +564,109 @@ export function ChatPane({ channel, query }: Props) {
             key={r.msg.id}
             msg={r.msg}
             grouped={r.grouped}
+            currentUserId={currentUserId}
+            editing={editingId === r.msg.id}
             onImageClick={setLightbox}
+            onStartEdit={(m) => setEditingId(m.id)}
+            onCancelEdit={() => setEditingId(null)}
+            onSubmitEdit={submitEdit}
+            onDelete={remove}
+            onReply={(m) => {
+              setReplyTo(m);
+              document.querySelector<HTMLInputElement>(".composer input")?.focus();
+            }}
+            onCopyLink={copyLink}
+            onInteractProp={interact}
           />
         ))}
+        {typingUsers.size > 0 && (
+          <div className="typing-indicator">
+            <span className="typing-dots">
+              <i /><i /><i />
+            </span>
+            {typingUsers.size === 1 ? "someone is typing…" : "several people are typing…"}
+          </div>
+        )}
       </div>
       <div className="composer">
-        <input
-          type="text"
-          placeholder={`Message ${channel.name}`}
-          autoComplete="off"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && send()}
-        />
+        {replyTo && (
+          <div className="reply-bar">
+            <Reply size={14} />
+            <span className="reply-bar-text">
+              Replying to <strong>{displayName(replyTo.author)}</strong>
+            </span>
+            <button className="reply-bar-close" onClick={() => setReplyTo(null)} aria-label="Cancel reply">
+              ✕
+            </button>
+          </div>
+        )}
+        {pendingFiles.length > 0 && (
+          <div className="pending-files">
+            {pendingFiles.map((f, i) => (
+              <div key={`${f.name}-${i}`} className="pending-file">
+                <Paperclip size={12} />
+                <span className="pending-file-name">{f.name}</span>
+                <span className="pending-file-size">
+                  {(f.size / 1024).toFixed(0)} KB
+                </span>
+                <button
+                  className="pending-file-remove"
+                  onClick={() => setPendingFiles((prev) => prev.filter((_, j) => j !== i))}
+                  aria-label={`Remove ${f.name}`}
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="composer-row">
+          <button
+            className="composer-attach icon-btn"
+            onClick={() => fileInputRef.current?.click()}
+            title="Attach a file"
+            aria-label="Attach a file"
+          >
+            <Paperclip size={20} />
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            hidden
+            onChange={(e) => {
+              const files = Array.from(e.target.files ?? []);
+              if (files.length) setPendingFiles((prev) => [...prev, ...files]);
+              e.target.value = "";
+            }}
+          />
+          <input
+            type="text"
+            placeholder={
+              uploading ? "Uploading…" : `Message ${channel.name}`
+            }
+            autoComplete="off"
+            value={draft}
+            disabled={uploading}
+            onPaste={onPaste}
+            onChange={(e) => {
+              setDraft(e.target.value);
+              notifyTyping();
+            }}
+            onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && send()}
+          />
+        </div>
       </div>
+      {toast && <div className="chat-toast">{toast}</div>}
       {lightbox && (
-        <div className="lightbox" onClick={() => setLightbox(null)}>
+        <div
+          className="lightbox"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Image preview"
+          tabIndex={-1}
+          onClick={() => setLightbox(null)}
+        >
           <img src={lightbox} alt="" />
         </div>
       )}
