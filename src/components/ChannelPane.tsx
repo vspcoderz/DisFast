@@ -24,6 +24,7 @@ interface Props {
   user: User;
   onSelect: (id: string, name: string, dm?: DmTarget) => void;
   onOpenSettings: () => void;
+  onOpenProfile: () => void;
 }
 
 function UnreadBadge({ count }: { count?: number }) {
@@ -52,6 +53,7 @@ export function ChannelPane({
   user,
   onSelect,
   onOpenSettings,
+  onOpenProfile,
 }: Props) {
   const isDm = selection === "dm";
   const textChannels = channels
@@ -140,7 +142,11 @@ export function ChannelPane({
         )}
       </div>
       <footer className="user-bar">
-        <div className="user-bar-main">
+        <button
+          className="user-bar-main"
+          onClick={onOpenProfile}
+          title="View your profile"
+        >
           <div className="user-bar-avatar">
             <Avatar user={user} size={30} />
             <span
@@ -152,7 +158,7 @@ export function ChannelPane({
             <span className="user-bar-name">{displayName(user)}</span>
             <span className="user-bar-status">{statusText}</span>
           </span>
-        </div>
+        </button>
         <button
           className="user-bar-btn"
           onClick={onOpenSettings}

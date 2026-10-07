@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { renderMarkdown } from "../markdown";
-import type { UserProfileResponse } from "../types";
+import type { User, UserProfileResponse } from "../types";
 import { displayName } from "../utils";
 import { Avatar } from "./Avatar";
 
@@ -30,16 +30,175 @@ function widgetImageUrl(fileId: string): string {
   return `https://cdn.discordapp.com/widget-images/${fileId}.png`;
 }
 
-export function ProfilePanel({ userId }: { userId: string }) {
+/** Editor for your own profile: display name, bio, pronouns, avatar, banner. */
+function ProfileEditor({
+  user,
+  bio,
+  pronouns,
+  onCancel,
+  onSaved,
+}: {
+  user: User;
+  bio: string;
+  pronouns: string;
+  onCancel: () => void;
+  onSaved: (u: User) => void;
+}) {
+  const [displayName, setDisplayName] = useState(user.global_name ?? "");
+  const [newBio, setNewBio] = useState(bio);
+  const [newPronouns, setNewPronouns] = useState(pronouns);
+  const [accent, setAccent] = useState(
+    user.accent_color != null
+      ? `#${user.accent_color.toString(16).padStart(6, "0")}`
+      : "",
+  );
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function readImage(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = String(reader.result);
+        const comma = result.indexOf(",");
+        resolve(comma >= 0 ? result.slice(comma + 1) : result);
+      };
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function uploadImage(kind: "avatars" | "banners", file: File) {
+    setBusy(true);
+    setError("");
+    try {
+      const data = await readImage(file);
+      const updated = await api.uploadProfileImage(kind, data);
+      // The response carries the new hash, so re-render from it.
+      onSaved(updated);
+      onCancel();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function save() {
+    setBusy(true);
+    setError("");
+    try {
+      const updated = await api.setProfile({
+        displayName,
+        bio: newBio,
+        pronouns: newPronouns,
+        accentColor: accent,
+      });
+      onSaved(updated);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="profile-editor">
+      <div className="profile-editor-row">
+        <label className="settings-field">
+          <span>Display name</span>
+          <input
+            type="text"
+            maxLength={32}
+            value={displayName}
+            onChange={(e) => setDisplayName(e.target.value)}
+          />
+        </label>
+        <label className="settings-field">
+          <span>Avatar</span>
+          <input
+            type="file"
+            accept="image/png,image/jpeg,image/gif,image/webp"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) void uploadImage("avatars", f);
+              e.target.value = "";
+            }}
+          />
+        </label>
+        <label className="settings-field">
+          <span>Banner</span>
+          <input
+            type="file"
+            accept="image/png,image/jpeg,image/gif,image/webp"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) void uploadImage("banners", f);
+              e.target.value = "";
+            }}
+          />
+        </label>
+      </div>
+      <label className="settings-field">
+        <span>Pronouns</span>
+        <input
+          type="text"
+          maxLength={32}
+          value={newPronouns}
+          onChange={(e) => setNewPronouns(e.target.value)}
+        />
+      </label>
+      <label className="settings-field">
+        <span>About me ({newBio.length}/190)</span>
+        <textarea
+          rows={4}
+          maxLength={190}
+          value={newBio}
+          onChange={(e) => setNewBio(e.target.value)}
+        />
+      </label>
+      <label className="settings-field">
+        <span>Accent colour</span>
+        <input
+          type="color"
+          value={accent || "#5865f2"}
+          onChange={(e) => setAccent(e.target.value)}
+        />
+      </label>
+      {error && <p className="error">{error}</p>}
+      <div className="profile-editor-actions">
+        <button className="settings-save" onClick={save} disabled={busy}>
+          {busy ? "Saving…" : "Save profile"}
+        </button>
+        <button className="settings-danger" onClick={onCancel} disabled={busy}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+interface Props {
+  userId: string;
+  /** Your own id enables the edit affordances. */
+  currentUserId?: string;
+  onProfileChanged?: (u: User) => void;
+}
+
+export function ProfilePanel({ userId, currentUserId, onProfileChanged }: Props) {
   const [profile, setProfile] = useState<UserProfileResponse | null>(null);
   const [error, setError] = useState("");
   const [bioExpanded, setBioExpanded] = useState(false);
+  const [editing, setEditing] = useState(false);
+
+  const isMe = userId === currentUserId;
 
   useEffect(() => {
     let alive = true;
     setProfile(null);
     setError("");
     setBioExpanded(false);
+    setEditing(false);
     api
       .getUserProfile(userId)
       .then((p) => alive && setProfile(p))
@@ -89,6 +248,32 @@ export function ProfilePanel({ userId }: { userId: string }) {
         <Avatar user={user} size={84} />
       </div>
       <div className="profile-card">
+        {isMe && editing ? (
+          <ProfileEditor
+            user={user}
+            bio={bio ?? ""}
+            pronouns={pronouns ?? ""}
+            onCancel={() => setEditing(false)}
+            onSaved={(updated) => {
+              setProfile((p) =>
+                p
+                  ? {
+                      ...p,
+                      user: { ...p.user, ...updated },
+                      user_profile: {
+                        ...p.user_profile,
+                        bio: updated.bio,
+                        pronouns: updated.pronouns,
+                      },
+                    }
+                  : p,
+              );
+              onProfileChanged?.(updated);
+              setEditing(false);
+            }}
+          />
+        ) : (
+          <>
         <div className="profile-name-row">
           <div className="profile-name">{name}</div>
           {nitroName && <span className="nitro-badge">{nitroName}</span>}
@@ -174,6 +359,16 @@ export function ProfilePanel({ userId }: { userId: string }) {
                 day: "numeric",
               })}
             </div>
+          </>
+        )}
+        {isMe && (
+          <button
+            className="profile-edit-btn"
+            onClick={() => setEditing(true)}
+          >
+            Edit profile
+          </button>
+        )}
           </>
         )}
       </div>

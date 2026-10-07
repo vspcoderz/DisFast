@@ -378,6 +378,133 @@ body,
   color: var(--text);
 }
 
+/* ---------- Settings tabs & theme ---------- */
+.settings-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 8px 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-tab {
+  padding: 8px 14px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-dim);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.settings-tab.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.settings-secondary {
+  align-self: flex-start;
+  padding: 8px 16px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-3);
+  color: var(--text);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.settings-secondary:hover {
+  filter: brightness(1.1);
+}
+
+/* Light theme: only overrides tokens, so every component follows. */
+:root[data-theme="light"] {
+  --bg-0: #ffffff;
+  --bg-1: #ffffff;
+  --bg-2: #f2f3f5;
+  --bg-3: #ebedef;
+  --bg-4: #ffffff;
+  --text: #060607;
+  --text-2: #4e5058;
+  --text-dim: #80848e;
+  --text-muted: #b5bac1;
+  --border: #e3e5e8;
+}
+
+@media (prefers-color-scheme: light) {
+  :root[data-theme="system"] {
+    --bg-0: #ffffff;
+    --bg-1: #ffffff;
+    --bg-2: #f2f3f5;
+    --bg-3: #ebedef;
+    --bg-4: #ffffff;
+    --text: #060607;
+    --text-2: #4e5058;
+    --text-dim: #80848e;
+    --text-muted: #b5bac1;
+    --border: #e3e5e8;
+  }
+}
+
+:root[data-reduce-motion="true"] * {
+  animation-duration: 0.01ms !important;
+  transition-duration: 0.01ms !important;
+}
+
+/* ---------- Profile editor ---------- */
+.profile-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.profile-editor-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.profile-editor .settings-field textarea {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-1);
+  color: var(--text);
+  font-size: 14px;
+  font-family: inherit;
+  resize: vertical;
+}
+
+.profile-editor .settings-field input[type="file"] {
+  padding: 6px;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.profile-editor-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.profile-edit-btn {
+  margin-top: 8px;
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-3);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.profile-edit-btn:hover {
+  filter: brightness(1.1);
+}
+
 /* ---------- Settings modal ---------- */
 .modal-scrim {
   position: fixed;

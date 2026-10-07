@@ -1147,6 +1147,114 @@ async fn set_status(
     res.json().await.map_err(|e| e.to_string())
 }
 
+/// Edit our own profile: display name, bio, pronouns, accent colour.
+/// Avatar and banner go through their own upload commands (they're
+/// multipart image uploads, not JSON fields).
+#[tauri::command]
+async fn set_profile(
+    state: State<'_, SharedSession>,
+    display_name: Option<String>,
+    bio: Option<String>,
+    pronouns: Option<String>,
+    accent_color: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let http = http(&state).await?;
+    let mut payload = serde_json::Map::new();
+
+    if let Some(name) = display_name {
+        // Discord accepts an empty string to clear the display name.
+        payload.insert(
+            "global_name".to_string(),
+            serde_json::Value::String(name.trim().to_string()),
+        );
+    }
+    if let Some(bio) = bio {
+        if bio.chars().count() > 190 {
+            return Err("Bio must be 190 characters or fewer.".to_string());
+        }
+        payload.insert(
+            "bio".to_string(),
+            serde_json::Value::String(bio.replace("```", "'''")),
+        );
+    }
+    if let Some(pronouns) = pronouns {
+        payload.insert(
+            "pronouns".to_string(),
+            serde_json::Value::String(pronouns.trim().to_string()),
+        );
+    }
+    if let Some(accent) = accent_color {
+        // "" clears the accent; otherwise it must be a hex triplet.
+        let trimmed = accent.trim().trim_start_matches('#').to_string();
+        if trimmed.is_empty() {
+            payload.insert("accent_color".to_string(), serde_json::Value::Null);
+        } else if trimmed.len() == 6 && u32::from_str_radix(&trimmed, 16).is_ok() {
+            let value = u32::from_str_radix(&trimmed, 16).unwrap();
+            payload.insert("accent_color".to_string(), serde_json::Value::from(value));
+        } else {
+            return Err("Accent colour must be a hex value like #1a2b3c.".to_string());
+        }
+    }
+
+    if payload.is_empty() {
+        return Err("nothing to update".to_string());
+    }
+
+    let res = http
+        .patch(format!("{API_BASE}/users/@me"))
+        .json(&serde_json::Value::Object(payload))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let status = res.status();
+    if !status.is_success() {
+        let body = res.text().await.unwrap_or_default();
+        return Err(format!("profile update failed ({status}): {body}"));
+    }
+    res.json().await.map_err(|e| e.to_string())
+}
+
+/// Upload a new avatar or banner. `kind` is "avatars" or "banners".
+#[tauri::command]
+async fn upload_profile_image(
+    state: State<'_, SharedSession>,
+    kind: String,
+    data_base64: String,
+) -> Result<serde_json::Value, String> {
+    let http = http(&state).await?;
+    let (path, max) = match kind.as_str() {
+        "avatars" => ("/users/@me/avatars", 8 * 1024 * 1024),
+        "banners" => ("/users/@me/banners", 3 * 1024 * 1024),
+        _ => return Err("kind must be 'avatars' or 'banners'".to_string()),
+    };
+
+    let bytes = BASE64
+        .decode(data_base64.trim())
+        .map_err(|e| format!("bad image data: {e}"))?;
+    if bytes.len() > max {
+        return Err(format!("image exceeds the {}-byte limit", max));
+    }
+
+    let part = reqwest::multipart::Part::bytes(bytes)
+        .file_name("image.png")
+        .mime_str("image/png")
+        .map_err(|e| e.to_string())?;
+    let form = reqwest::multipart::Form::new().part("file", part);
+
+    let res = http
+        .post(format!("{API_BASE}{path}"))
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let status = res.status();
+    if !status.is_success() {
+        let body = res.text().await.unwrap_or_default();
+        return Err(format!("image upload failed ({status}): {body}"));
+    }
+    res.json().await.map_err(|e| e.to_string())
+}
+
 /// Edit an existing message. Discord allows editing your own messages
 /// within 15 minutes; beyond that (or for others' messages) you need
 /// MANAGE_MESSAGES, and the API rejects it with 403.
@@ -1324,6 +1432,8 @@ pub fn run() {
             get_roles,
             get_user_profile,
             set_status,
+            set_profile,
+            upload_profile_image,
             interact_component,
             create_invite,
             get_dev_token,

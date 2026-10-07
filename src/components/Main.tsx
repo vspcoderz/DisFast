@@ -59,11 +59,20 @@ export function Main({ user, onLoggedOut }: { user: User; onLoggedOut: () => voi
   const [notifyEnabled, setNotifyEnabled] = useState(false);
   const guildOfRef = useRef<(channelId: string) => string | null>(() => () => null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Kept in sync after profile edits so the user bar reflects changes.
+  const [selfUser, setSelfUser] = useState<User>(user);
+  const [showSelfProfile, setShowSelfProfile] = useState(false);
   const [prefs, setPrefs] = useState<Prefs>({
     notifications: true,
+    notificationSounds: true,
     sendTyping: true,
     messageFont: 15,
     compactMode: false,
+    theme: "dark",
+    accent: "#5865f2",
+    reduceMotion: false,
+    showMemberList: true,
+    muteAll: false,
   });
 
   // Load guild list once.
@@ -137,7 +146,7 @@ export function Main({ user, onLoggedOut }: { user: User; onLoggedOut: () => voi
   useEffect(() => {
     const unlisten = events.onMessageCreate((msg) => {
       maybeNotify(msg, {
-        enabled: notifyEnabled,
+        enabled: notifyEnabled && !prefs.muteAll,
         activeChannelId: activeChannelRef.current?.id ?? null,
         currentUserId: user.id,
         guildOf: (channelId) => guildOfRef.current(channelId),
@@ -204,7 +213,8 @@ export function Main({ user, onLoggedOut }: { user: User; onLoggedOut: () => voi
   const recipientId = activeChannel?.recipientId;
   const isGroupDm = activeChannel?.isGroupDm === true;
   const profileVisible = (recipientId != null || isGroupDm) && showProfile;
-  const showMembers = activeGuild !== "dm" && activeChannel != null;
+  const showMembers =
+    activeGuild !== "dm" && activeChannel != null && prefs.showMemberList;
 
   const guild = guilds.find((g) => g.id === activeGuild) ?? null;
   // Custom status wins; otherwise show the presence label.
@@ -233,9 +243,13 @@ export function Main({ user, onLoggedOut }: { user: User; onLoggedOut: () => voi
         unreadChannels={unreadChannels}
         gatewayStatus={gatewayStatus}
         statusText={prefsStatusText}
-        user={user}
+        user={selfUser}
         onSelect={selectChannel}
         onOpenSettings={() => setSettingsOpen(true)}
+        onOpenProfile={() => {
+          setShowSelfProfile((v) => !v);
+          setShowProfile(false);
+        }}
       />
 
       {/* Header spans the chat + profile columns, so the search bar sits
@@ -302,11 +316,24 @@ export function Main({ user, onLoggedOut }: { user: User; onLoggedOut: () => voi
       )}
 
       {showMembers && <MemberSidebar guildId={activeGuild} />}
+      {showSelfProfile && (
+        <ProfilePanel
+          userId={selfUser.id}
+          currentUserId={user.id}
+          onProfileChanged={setSelfUser}
+        />
+      )}
       {profileVisible &&
         (isGroupDm ? (
           <GroupDmPanel channelId={activeChannel.id} name={activeChannel.name} members={activeChannel.recipients ?? []} />
         ) : (
-          <ProfilePanel userId={recipientId!} />
+          <ProfilePanel
+            userId={recipientId!}
+            currentUserId={user.id}
+            onProfileChanged={(u) => {
+              if (u.id === user.id) setSelfUser(u);
+            }}
+          />
         ))}
       {error && <div className="error-toast">{error}</div>}
       <Settings

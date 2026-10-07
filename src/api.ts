@@ -72,6 +72,21 @@ export const api = {
       customText: customText ?? null,
       emojiName: emojiName ?? null,
     }),
+  setProfile: (p: {
+    displayName?: string;
+    bio?: string;
+    pronouns?: string;
+    accentColor?: string;
+  }) =>
+    invoke<User>("set_profile", {
+      displayName: p.displayName ?? null,
+      bio: p.bio ?? null,
+      pronouns: p.pronouns ?? null,
+      accentColor: p.accentColor ?? null,
+    }),
+  /** Upload a new avatar ("avatars") or banner ("banners"), base64 PNG. */
+  uploadProfileImage: (kind: "avatars" | "banners", dataBase64: string) =>
+    invoke<User>("upload_profile_image", { kind, dataBase64 }),
   createInvite: (channelId: string) =>
     invoke<{ code: string }>("create_invite", { channelId }),
   addReaction: (channelId: string, messageId: string, emoji: string) =>
