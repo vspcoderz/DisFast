@@ -123,9 +123,64 @@ export function ComponentView({
               : undefined
           }
         >
+          {c.emoji && (
+            c.emoji.id ? (
+              <img
+                src={`https://cdn.discordapp.com/emojis/${c.emoji.id}.${c.emoji.animated ? "gif" : "webp"}`}
+                alt=""
+                loading="lazy"
+              />
+            ) : (
+              <span className="emoji">{c.emoji.name}</span>
+            )
+          )}
           {c.label ?? "Button"}
         </button>
       );
+    case 3: // StringSelect
+case 5: // UserSelect
+case 6: // RoleSelect
+case 7: // MentionableSelect
+case 8: // ChannelSelect
+    {
+      const componentType = c.type;
+      const selected = c.values ?? [];
+      return (
+        <div className="cv2-select-wrap">
+          {selected.length > 0 && (
+            <div className="cv2-select-values">
+              {selected.map((v, i) => (
+                <span key={i} className="cv2-pill">
+                  {v}
+                </span>
+              ))}
+            </div>
+          )}
+          <select
+            className="cv2-select"
+            defaultValue=""
+            onChange={(e) => {
+              if (!e.target.value || !c.custom_id) return;
+              onInteract?.({
+                customId: c.custom_id,
+                componentType,
+                values: [e.target.value],
+              });
+              e.target.value = "";
+            }}
+          >
+            <option value="" disabled>
+              {c.placeholder ?? "Select an option…"}
+            </option>
+            {c.options?.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      );
+    }
     case 9: // Section
       return (
         <div className="cv2-section">

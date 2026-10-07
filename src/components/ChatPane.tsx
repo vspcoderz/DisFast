@@ -134,7 +134,7 @@ const MessageRow = memo(function MessageRow({
             dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }}
           />
         ) : null}
-        {isV2 &&
+        {(msg.components?.length ?? 0) > 0 &&
           msg.components?.map((c, i) => (
             <ComponentView key={i} c={c} onInteract={onInteract} />
           ))}

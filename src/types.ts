@@ -77,9 +77,18 @@ export interface MessageComponent {
   content?: string;
   label?: string;
   url?: string;
+  style?: number;
   disabled?: boolean;
   divider?: boolean;
   name?: string;
+  /** Present on interactive components (buttons, selects). */
+  custom_id?: string;
+  emoji?: { name: string | null; id: string | null; animated?: boolean };
+  placeholder?: string;
+  min_values?: number;
+  max_values?: number;
+  options?: { label: string; value: string; description?: string }[];
+  values?: string[];
   accent_color?: number | null;
   components?: MessageComponent[];
   accessory?: MessageComponent;

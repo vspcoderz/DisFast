@@ -1010,6 +1010,43 @@ body,
   height: 8px;
 }
 
+.cv2-select-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 420px;
+}
+
+.cv2-select-values {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.cv2-pill {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 2px 8px;
+  font-size: 13px;
+}
+
+.cv2-select {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-3);
+  color: var(--text);
+  font-size: 14px;
+}
+
+.cv2-button img {
+  width: 18px;
+  height: 18px;
+  vertical-align: -4px;
+  margin-right: 4px;
+}
+
 /* ---------- DM profile panel ---------- */
 .app-view.with-profile {
   grid-template-columns: 68px 240px minmax(0, 1fr) 300px;
