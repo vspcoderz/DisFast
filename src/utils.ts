@@ -4,9 +4,14 @@ export function displayName(user: User): string {
   return user.global_name || user.username;
 }
 
-export function avatarUrl(user: User): string {
+export function avatarUrl(user: User, size = 40): string {
   if (user.avatar) {
-    return `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.webp?size=64`;
+    // Ask for a size close to what's rendered (×2 for HiDPI) instead of a
+// fixed 64 — the profile avatar was being upscaled, and the small DM-list
+// avatars were downloading far more pixels than they display.
+  const dpr = typeof devicePixelRatio === "number" ? Math.min(devicePixelRatio, 2) : 1;
+  const px = Math.min(256, Math.max(32, Math.round(size * dpr)));
+  return `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.webp?size=${px}`;
   }
   // New-style default avatar index (snowflake bits)
   const idx = Number(BigInt(user.id) >> 22n) % 6;

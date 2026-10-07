@@ -117,7 +117,7 @@ export function ChannelPane({
                       ? { isGroupDm: true, recipients: ch.recipients ?? [] }
                       : recipient && {
                           recipientId: recipient.id,
-                          recipientAvatar: avatarUrl(recipient),
+                          recipientAvatar: avatarUrl(recipient, 24),
                           recipientUsername: recipient.username,
                         },
                   )
