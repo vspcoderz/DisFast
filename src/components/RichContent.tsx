@@ -20,28 +20,44 @@ function resize(url: string, width = 520): string {
   return `${url}${url.includes("?") ? "&" : "?"}width=${width}&format=webp&quality=90`;
 }
 
+/** Prefer Discord's media proxy over the original third-party host. */
+function mediaSrc(m?: { url: string; proxy_url?: string }): string | undefined {
+  return m ? (m.proxy_url ?? m.url) : undefined;
+}
+
 export function EmbedView({ embed }: { embed: Embed }) {
   // Video / gifv embeds are frequently 4K. Rendering one as <img> forces
   // a full decode on mount, which stalls the UI — so use <video> with
   // preload="none" and let the poster carry the still frame.
   if (embed.type === "video" || embed.type === "gifv") {
-    const src = embed.video?.url ?? embed.image?.url ?? embed.url;
-    if (!src) return null;
+    const src = mediaSrc(embed.video) ?? mediaSrc(embed.image);
+    if (!src) {
+      // e.g. YouTube: no playable file, only a page link.
+      return embed.url ? (
+        <a href={embed.url} target="_blank" rel="noreferrer">
+          {embed.title ?? embed.url}
+        </a>
+      ) : null;
+    }
+    const poster = mediaSrc(embed.thumbnail);
     return (
       <video
         className="embed-video"
         src={src}
-        poster={embed.thumbnail?.url ? resize(embed.thumbnail.url) : undefined}
+        poster={poster ? resize(poster) : undefined}
         controls
         preload="none"
         playsInline
+        // gifv embeds are silent loops in Discord; keep them muted.
+        muted={embed.type === "gifv"}
+        loop={embed.type === "gifv"}
       />
     );
   }
 
   if (embed.type === "image") {
     const dim = embed.image ?? embed.thumbnail;
-    const url = dim?.url ?? embed.url;
+    const url = mediaSrc(dim) ?? embed.url;
     return url ? (
       <img
         className="attachment-img"
@@ -64,7 +80,13 @@ export function EmbedView({ embed }: { embed: Embed }) {
     <div className="embed" style={{ borderLeftColor: hexColor(embed.color) }}>
       {embed.author && (
         <div className="embed-author">
-          {embed.author.icon_url && <img src={embed.author.icon_url} alt="" />}
+          {(embed.author.proxy_icon_url ?? embed.author.icon_url) && (
+            <img
+              src={embed.author.proxy_icon_url ?? embed.author.icon_url}
+              alt=""
+              loading="lazy"
+            />
+          )}
           {embed.author.url ? (
             <a href={embed.author.url} target="_blank" rel="noreferrer">
               {embed.author.name}
@@ -102,7 +124,7 @@ export function EmbedView({ embed }: { embed: Embed }) {
       {embed.image && (
         <img
           className="embed-image"
-          src={resize(embed.image.url)}
+          src={resize(mediaSrc(embed.image)!)}
           alt=""
           loading="lazy"
           decoding="async"
@@ -121,7 +143,7 @@ export function EmbedView({ embed }: { embed: Embed }) {
       {embed.thumbnail && !embed.image && (
         <img
           className="embed-thumbnail"
-          src={embed.thumbnail.url}
+          src={resize(mediaSrc(embed.thumbnail)!, 160)}
           alt=""
           loading="lazy"
           decoding="async"
@@ -131,7 +153,13 @@ export function EmbedView({ embed }: { embed: Embed }) {
       )}
       {embed.footer && (
         <div className="embed-footer">
-          {embed.footer.icon_url && <img src={embed.footer.icon_url} alt="" />}
+          {(embed.footer.proxy_icon_url ?? embed.footer.icon_url) && (
+            <img
+              src={embed.footer.proxy_icon_url ?? embed.footer.icon_url}
+              alt=""
+              loading="lazy"
+            />
+          )}
           <span>{embed.footer.text}</span>
         </div>
       )}

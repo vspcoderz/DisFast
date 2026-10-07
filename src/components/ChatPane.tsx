@@ -217,6 +217,18 @@ function emojiKey(emoji: { id: string | null; name: string | null }): string {
   return emoji.name ?? (emoji.id ?? "");
 }
 
+/** Small preview for an image waiting to be sent. */
+function PendingThumb({ file }: { file: File }) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    const u = URL.createObjectURL(file);
+    setUrl(u);
+    // Free the blob when the chip goes away.
+    return () => URL.revokeObjectURL(u);
+  }, [file]);
+  return url ? <img className="pending-thumb" src={url} alt="" /> : null;
+}
+
 /** "Today" / "Yesterday" / a date, for the day dividers. */
 function dateLabel(iso: string): string {
   const d = new Date(iso);
@@ -507,16 +519,42 @@ function readAsBase64(file: File): Promise<string> {
     }
   }
 
-  /** Paste images straight into the composer. */
-  function onPaste(e: ClipboardEvent) {
-    const items = Array.from(e.clipboardData.items);
-    const files = items
+  /**
+   * Paste images straight into the composer.
+   *
+   * Path 1: the browser exposes the image as a clipboard file (works for
+   * some sources). Path 2: WebKitGTK often exposes nothing for images
+   * copied from other apps or screenshot tools — so if the paste carries
+   * no text, ask the Rust side to read the system clipboard directly.
+   */
+  async function onPaste(e: ClipboardEvent) {
+    const data = e.clipboardData;
+    const fromItems = Array.from(data?.items ?? [])
       .filter((i) => i.kind === "file" && i.type.startsWith("image/"))
       .map((i) => i.getAsFile())
       .filter((f): f is File => f != null);
+    const fromFiles = Array.from(data?.files ?? []).filter((f) =>
+      f.type.startsWith("image/"),
+    );
+    const files = fromItems.length > 0 ? fromItems : fromFiles;
     if (files.length > 0) {
       e.preventDefault();
       setPendingFiles((prev) => [...prev, ...files]);
+      return;
+    }
+
+    // Plain text paste: leave it alone.
+    if (data?.getData("text/plain")) return;
+
+    e.preventDefault();
+    try {
+      const b64 = await api.readClipboardImage();
+      if (!b64) return;
+      const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+      const file = new File([bytes], `pasted-${Date.now()}.png`, { type: "image/png" });
+      setPendingFiles((prev) => [...prev, file]);
+    } catch (err) {
+      setToast(String(err).replace(/^Error:\s*/, ""));
     }
   }
 
@@ -726,7 +764,11 @@ function readAsBase64(file: File): Promise<string> {
           <div className="pending-files">
             {pendingFiles.map((f, i) => (
               <div key={`${f.name}-${i}`} className="pending-file">
-                <Paperclip size={12} />
+                {f.type.startsWith("image/") ? (
+                  <PendingThumb file={f} />
+                ) : (
+                  <Paperclip size={12} />
+                )}
                 <span className="pending-file-name">{f.name}</span>
                 <span className="pending-file-size">
                   {(f.size / 1024).toFixed(0)} KB

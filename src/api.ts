@@ -55,6 +55,8 @@ export const api = {
     }),
   uploadAttachment: (channelId: string, filename: string, dataBase64: string) =>
     invoke<Message>("upload_attachment", { channelId, filename, dataBase64 }),
+  /** Base64 PNG from the system clipboard, or null if it holds no image. */
+  readClipboardImage: () => invoke<string | null>("read_clipboard_image"),
   getPins: (channelId: string) =>
     invoke<{ items: { pinned_at: string; message: Message }[]; has_more: boolean }>(
       "get_pins",

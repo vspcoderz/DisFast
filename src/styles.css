@@ -1764,6 +1764,14 @@ body,
   font-size: 13px;
 }
 
+.pending-thumb {
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
 .pending-file-name {
   flex: 1;
   min-width: 0;

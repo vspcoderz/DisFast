@@ -12,6 +12,11 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+# System clipboard access for pasting images: WebKitGTK often doesn't
+# expose clipboard images to the page. wayland-data-control is needed on
+# Wayland compositors like Hyprland.
+arboard = { version = "3", default-features = false, features = ["image-data", "wayland-data-control"] }
+png = "0.17"
 base64 = "0.22"
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }

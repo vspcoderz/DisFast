@@ -1049,6 +1049,45 @@ async fn send_with_attachment(
     res.json().await.map_err(|e| e.to_string())
 }
 
+/// Read an image from the system clipboard and return it as base64 PNG,
+/// or `None` if the clipboard holds no image.
+///
+/// WebKitGTK frequently doesn't expose pasted images (screenshots,
+/// images copied from other apps) through `clipboardData`, so the paste
+/// handler falls back to this.
+#[tauri::command]
+async fn read_clipboard_image() -> Result<Option<String>, String> {
+    // Clipboard access is blocking — keep it off the async runtime.
+    tokio::task::spawn_blocking(|| {
+        let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
+        let image = match clipboard.get_image() {
+            Ok(image) => image,
+            Err(arboard::Error::ContentNotAvailable) => return Ok(None),
+            Err(e) => return Err(format!("clipboard read failed: {e}")),
+        };
+
+        // arboard gives raw RGBA; encode it as PNG for upload.
+        let mut png_bytes = Vec::new();
+        {
+            let mut encoder =
+                png::Encoder::new(&mut png_bytes, image.width as u32, image.height as u32);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder.write_header().map_err(|e| e.to_string())?;
+            writer
+                .write_image_data(&image.bytes)
+                .map_err(|e| e.to_string())?;
+        }
+
+        if png_bytes.len() > 20 * 1024 * 1024 {
+            return Err("pasted image exceeds Discord's 20 MiB limit".to_string());
+        }
+        Ok(Some(BASE64.encode(png_bytes)))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Folders aren't available over the REST API any more (the
 /// /users/@me/guild-folders endpoint 404s), so the frontend groups
 /// servers locally. This command exists only so the frontend can confirm
@@ -1437,6 +1476,7 @@ pub fn run() {
             send_message,
             upload_attachment,
             send_with_attachment,
+            read_clipboard_image,
             get_guild_ids,
             edit_message,
             delete_message,
